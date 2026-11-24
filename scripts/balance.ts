@@ -179,3 +179,7 @@ if (process.env.DEBUG) {
   for (const n of r.nodes) console.log(n.id, { cap: n.cap, comp: n.computeTok, mem: n.memCap, tf: n.thermalFactor, pf: n.powerFactor, temp: n.temp });
   console.log(bottlenecks(s, r).map((b) => b.tip));
 }
+if (process.env.DUMP) {
+  const fs = await import('node:fs');
+  fs.writeFileSync(process.env.DUMP, JSON.stringify(s));
+}

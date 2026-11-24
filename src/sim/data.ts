@@ -57,7 +57,7 @@ export interface ItemDef {
 }
 
 export const ITEMS: ItemDef[] = [
-  { id: 'scheduler', name: 'Auto-scheduler', section: 'compute', scope: 'rig', baseCost: 1, growth: 1, maxLevel: () => 1, tradeoff: 'processes requests for you' },
+  { id: 'scheduler', name: 'Auto-scheduler', section: 'compute', scope: 'rig', baseCost: 3, growth: 1, maxLevel: () => 1, tradeoff: 'processes requests for you' },
   { id: 'cores', name: 'Cores', section: 'compute', scope: 'node', baseCost: 3, growth: 1.9, maxLevel: (n) => (n ? n.maxCores - 1 : 0), tradeoff: 'more cores, more heat and power' },
   { id: 'clock', name: 'Clock speed', section: 'compute', scope: 'node', baseCost: 2, growth: 1.25, maxLevel: () => 40, tradeoff: 'faster, runs hotter' },
   { id: 'memory', name: 'Memory', section: 'compute', scope: 'node', baseCost: 4, growth: 1.2, maxLevel: () => 60, tradeoff: 'feeds tokens to the cores' },
@@ -155,7 +155,7 @@ export interface GoalDef {
   lab: number;
 }
 
-export type Reward = { talent: TalentId } | { model: ModelId } | { stageComplete: true };
+export type Reward = ({ talent: TalentId } | { model: ModelId }) & { stageComplete?: true };
 
 export interface ClientQuirk {
   fixedTokens?: number; // every request is exactly this many tokens
@@ -251,7 +251,7 @@ export const STAGE_1_CLIENTS: ClientDef[] = [
       { spec: { kind: 'ownNode', node: 'n3' }, cash: 200000, lab: 2 },
       { spec: { kind: 'served', n: 25000 }, cash: 500000, lab: 2 },
     ],
-    reward: { stageComplete: true },
+    reward: { talent: 'sal', stageComplete: true },
   },
 ];
 

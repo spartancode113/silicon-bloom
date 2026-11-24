@@ -478,7 +478,7 @@ function completeGoal(s: GameState, g: GoalDef, events: GameEvent[]) {
     s.goalIndex = 0;
     s.burstClock = 0;
     s.burstPeakQueue = 0;
-    if ('stageComplete' in rw) {
+    if (rw.stageComplete) {
       s.stageComplete = true;
       s.stageCompleteTime = s.playTime;
       events.push({ kind: 'stage', text: 'Chip Stage complete!' });

@@ -2,7 +2,7 @@
 
 25 clients, five per Stage, served one at a time. Each client sends one kind of request, has a quirk that changes how those requests behave, and a short chain of Goals. Finishing a client's last Goal pays a reward: odd-numbered clients give **Talent**, even-numbered clients give a **Model**. The fifth client in each Stage unlocks the next Stage. Client 25 ends the game and stops the clock.
 
-Numbers are placeholders to show the shape; real values come from balancing the prototype. "Pushes" says which Section the client makes you care about.
+Numbers are placeholders to show the shape. The live Chip Stage values are in `src/sim/data.ts` and were tuned with `npm run balance`. "Pushes" says which Section the client makes you care about.
 
 Request types arrive one per Stage: **Text** (Chip), **Image** (GPU Board), **Code** (Server Rack), **Voice** (Server Row), **Video** (AI Data Hall).
 

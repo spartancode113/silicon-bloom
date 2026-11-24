@@ -132,7 +132,7 @@ These replace daily rewards, keeping the scoreboard fair.
 ## 13. Technical approach
 
 - **Language:** TypeScript, built with Vite.
-- **Rendering:** HTML canvas (PixiJS) for the rig, packets and glow. HTML/CSS for panels and menus.
+- **Rendering:** HTML canvas (2D) for the rig, packets and glow. HTML/CSS for panels and menus.
 - **Simulation:** a fixed-step tick (e.g. 10 per second) that's separate from rendering, with deterministic maths, so balancing can be tested without a browser.
 - **Data-driven content:** clients, components, nodes, Talent, Models and research defined in data files, so balancing means editing numbers, not code.
 - **Saving:** versioned save in browser storage.
