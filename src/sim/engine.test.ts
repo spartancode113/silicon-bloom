@@ -139,7 +139,7 @@ describe('core clusters', () => {
 
   it('a chip cannot hold more clusters than its design allows', () => {
     s.cash = 1e12;
-    expect(buy(s, 'cluster', 'n14', 10)).toBe(1); // 14nm holds 2
+    expect(buy(s, 'cluster', 'n14', 10)).toBe(3); // every chip holds 4
   });
 });
 

@@ -31,8 +31,8 @@ export interface NodeDef {
 }
 
 export const NODES: NodeDef[] = [
-  { id: 'n14', label: '14nm', chipName: 'CHIP-14', tokPerCoreGHz: 3, baseClock: 1.2, clockStep: 0.08, coresPerCluster: 6, maxClusters: 2, heatPerCoreGHz: 6, powerPerCoreGHz: 8, idlePower: 5, memBase: 6, coolBase: 10, psuBase: 20, costMult: 1, unlockCost: 0 },
-  { id: 'n7', label: '7nm', chipName: 'CHIP-07', tokPerCoreGHz: 9, baseClock: 1.8, clockStep: 0.1, coresPerCluster: 8, maxClusters: 3, heatPerCoreGHz: 7, powerPerCoreGHz: 9, idlePower: 10, memBase: 60, coolBase: 40, psuBase: 80, costMult: 25, unlockCost: 800, research: 'node7' },
+  { id: 'n14', label: '14nm', chipName: 'CHIP-14', tokPerCoreGHz: 3, baseClock: 1.2, clockStep: 0.08, coresPerCluster: 6, maxClusters: 4, heatPerCoreGHz: 6, powerPerCoreGHz: 8, idlePower: 5, memBase: 6, coolBase: 10, psuBase: 20, costMult: 1, unlockCost: 0 },
+  { id: 'n7', label: '7nm', chipName: 'CHIP-07', tokPerCoreGHz: 9, baseClock: 1.8, clockStep: 0.1, coresPerCluster: 8, maxClusters: 4, heatPerCoreGHz: 7, powerPerCoreGHz: 9, idlePower: 10, memBase: 60, coolBase: 40, psuBase: 80, costMult: 25, unlockCost: 800, research: 'node7' },
   { id: 'n5', label: '5nm', chipName: 'CHIP-05', tokPerCoreGHz: 24, baseClock: 2.4, clockStep: 0.12, coresPerCluster: 8, maxClusters: 4, heatPerCoreGHz: 8, powerPerCoreGHz: 10, idlePower: 20, memBase: 500, coolBase: 150, psuBase: 300, costMult: 400, unlockCost: 20000, research: 'node5' },
   { id: 'n3', label: '3nm', chipName: 'CHIP-03', tokPerCoreGHz: 60, baseClock: 3.0, clockStep: 0.14, coresPerCluster: 12, maxClusters: 4, heatPerCoreGHz: 9, powerPerCoreGHz: 11, idlePower: 40, memBase: 4000, coolBase: 600, psuBase: 1200, costMult: 2500, unlockCost: 100000, research: 'node3' },
 ];
@@ -61,7 +61,7 @@ export const ITEMS: ItemDef[] = [
   { id: 'scheduler', name: 'Auto-scheduler', section: 'compute', scope: 'rig', baseCost: 3, growth: 1, maxLevel: () => 1, tradeoff: 'processes requests for you' },
   { id: 'cores', name: 'Cores', section: 'compute', scope: 'cluster', baseCost: 3, growth: 1.9, maxLevel: (n) => (n ? n.coresPerCluster - 1 : 0), tradeoff: 'more cores, more heat and power' },
   { id: 'clock', name: 'Clock speed', section: 'compute', scope: 'cluster', baseCost: 2, growth: 1.25, maxLevel: () => 40, tradeoff: 'faster, runs hotter' },
-  { id: 'cluster', name: 'Core cluster', section: 'compute', scope: 'node', baseCost: 120, growth: 9, maxLevel: (n) => (n ? n.maxClusters - 1 : 0), tradeoff: 'a new block of cores; shares heat and power' },
+  { id: 'cluster', name: 'Core cluster', section: 'compute', scope: 'node', baseCost: 120, growth: 9, maxLevel: (n) => (n ? n.maxClusters - 1 : 0), tradeoff: 'new core block; shares heat and power' },
   { id: 'memory', name: 'Memory', section: 'compute', scope: 'node', baseCost: 4, growth: 1.6, maxLevel: () => 60, tradeoff: 'feeds tokens to the cores' },
   { id: 'l3', name: 'L3 cache', section: 'compute', scope: 'node', baseCost: 30, growth: 1.45, maxLevel: () => 30, minNode: 'n7', tradeoff: 'boosts memory, draws power' },
   { id: 'npu', name: 'NPU', section: 'compute', scope: 'node', baseCost: 80, growth: 1.42, maxLevel: () => 40, minNode: 'n5', tradeoff: 'AI accelerator, adds heat' },

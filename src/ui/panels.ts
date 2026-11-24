@@ -247,7 +247,7 @@ export function upgradeCards(s: GameState, ui: UiState, bn: Bottleneck[]): strin
     const next = itemValue(s, it.id, s.selectedNode, Math.min(max, lvl + shownN));
     const scope = it.scope === 'cluster' ? `<span class="scope">C${ns.cluster + 1}</span>`
       : it.scope === 'node' ? `<span class="scope">${node.label}</span>` : '<span class="scope rig">RIG</span>';
-    return `<div class="up-card ${red ? 'red' : ''} ${maxed ? 'maxed' : ''}">
+    return `<div class="up-card ${red ? 'red' : ''} ${maxed ? 'maxed' : ''}" title="${esc(it.name)}: ${esc(it.tradeoff)}">
       ${red ? '<div class="flag">BOTTLENECK</div>' : ''}
       <div class="up-head">${scope}<b>${esc(it.name)}</b><span class="up-lv">LV ${lvl}${max < 1000 ? `/${max}` : ''}</span></div>
       <div class="up-val">${maxed ? `<span>${cur}</span>` : `${cur} → <span>${next}</span>`} <small>${UNIT[it.id] ?? ''}</small></div>
