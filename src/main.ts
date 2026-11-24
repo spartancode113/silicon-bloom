@@ -188,14 +188,25 @@ document.addEventListener('click', (e) => {
   if (fn) { fn(target.dataset); render(bottlenecks(game, stats)); }
 });
 
+// Clicking a part of the rig opens the matching upgrade tab.
 el.canvas.addEventListener('pointerdown', (e) => {
   if (paused) return;
   const r = el.canvas.getBoundingClientRect();
-  const id = rig.chipAt(e.clientX - r.left, e.clientY - r.top);
-  if (!id) return;
-  game.selectedNode = id;
-  if (clickProcess(game, events)) { rig.flashClick(); rig.burstFromChip(id); flushEvents(); }
+  const z = rig.zoneAt(e.clientX - r.left, e.clientY - r.top);
+  if (!z) return;
+  ui.section = z.section;
+  if (z.node) {
+    game.selectedNode = z.node;
+    if (clickProcess(game, events)) { rig.flashClick(); rig.burstFromChip(z.node); flushEvents(); }
+  }
+  render(bottlenecks(game, stats));
 });
+el.canvas.addEventListener('pointermove', (e) => {
+  const r = el.canvas.getBoundingClientRect();
+  rig.hover = paused ? null : rig.zoneAt(e.clientX - r.left, e.clientY - r.top);
+  el.canvas.style.cursor = rig.hover ? 'pointer' : 'default';
+});
+el.canvas.addEventListener('pointerleave', () => { rig.hover = null; });
 
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {

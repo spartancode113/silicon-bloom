@@ -26,8 +26,11 @@ const GAP = 70;
 interface Rect { x: number; y: number; w: number; h: number }
 interface Particle { pts: [number, number][]; t: number; speed: number; color: string; size: number }
 
+export type ZoneSection = 'compute' | 'thermal' | 'power' | 'network';
+export interface Zone { rect: Rect; section: ZoneSection; node?: NodeId }
 export interface RigView {
   chipRects: Map<NodeId, Rect>;
+  zones: Zone[];
 }
 
 export class RigRenderer {
@@ -38,7 +41,8 @@ export class RigRenderer {
   private time = 0;
   private fanAngle = new Map<NodeId, number>();
   private clickFlash = 0;
-  view: RigView = { chipRects: new Map() };
+  view: RigView = { chipRects: new Map(), zones: [] };
+  hover: Zone | null = null;
 
   constructor(private canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -58,9 +62,14 @@ export class RigRenderer {
     return [(sx - this.canvas.width / 2) / (this.cam.scale * dpr) + this.cam.x, (sy - this.canvas.height / 2) / (this.cam.scale * dpr) + this.cam.y];
   }
 
-  chipAt(px: number, py: number): NodeId | null {
+  /** Which clickable part of the rig is under this point (CSS pixels)? */
+  zoneAt(px: number, py: number): Zone | null {
     const [wx, wy] = this.toWorld(px, py);
-    for (const [id, r] of this.view.chipRects) if (wx >= r.x && wx <= r.x + r.w && wy >= r.y && wy <= r.y + r.h) return id;
+    const pad = 10;
+    for (const z of this.view.zones) {
+      const r = z.rect;
+      if (wx >= r.x - pad && wx <= r.x + r.w + pad && wy >= r.y - pad && wy <= r.y + r.h + pad) return z;
+    }
     return null;
   }
 
@@ -88,6 +97,11 @@ export class RigRenderer {
     const psu: Rect = { x: leftX, y: chipY + 20, w: 140, h: CHIP - 20 };
     const clockBox: Rect = { x: leftX, y: chipY - 110, w: 140, h: 100 };
     const rad: Rect = { x: Math.max(x0 + chipsW + 70, barW / 2 + 20), y: chipY - 110, w: 150, h: CHIP + 110 };
+    this.view.zones = [
+      ...[...rects].map(([id, rect]) => ({ rect, section: 'compute' as const, node: id })),
+      { rect: clockBox, section: 'compute' }, { rect: psu, section: 'power' }, { rect: rad, section: 'thermal' },
+      { rect: users, section: 'network' }, { rect: billing, section: 'network' },
+    ];
     const bbox = { x: psu.x - 30, y: billing.y - 40, w: rad.x + rad.w + 30 - (psu.x - 30), h: users.y + users.h + 40 - (billing.y - 40) };
 
     // ----- camera: fit everything, never zoom in past 1×, ease toward target
@@ -202,6 +216,21 @@ export class RigRenderer {
     // ----- packets
     this.spawn(r, rects, users, billing, dt);
     this.stepParticles(dt);
+
+    // ----- hover outline on clickable parts
+    if (this.hover) {
+      const hr = this.hover.rect;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(207,231,238,0.55)';
+      ctx.setLineDash([5, 5]);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.roundRect(hr.x - 8, hr.y - 8, hr.w + 16, hr.h + 16, 14);
+      ctx.stroke();
+      ctx.restore();
+      const name = { compute: 'COMPUTE', thermal: 'THERMAL', power: 'POWER', network: 'NETWORK' }[this.hover.section];
+      this.label(`UPGRADE ${name} ›`, hr.x + hr.w / 2, hr.y - 16, C.text, 11, 'center', true);
+    }
 
     // ----- manual hint
     if (!r.scheduler) {

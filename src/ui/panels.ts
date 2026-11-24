@@ -82,17 +82,15 @@ export function clientCard(s: GameState): string {
     return `<div class="card client done"><div class="eyebrow">Chip Stage complete</div><h3>All five clients served</h3>
       <p class="muted">The GPU Board arrives in the next milestone. Keep tinkering if you like.</p></div>`;
   }
-  const goals = c.goals.map((g, i) => {
-    const state = i < s.goalIndex ? 'done' : i === s.goalIndex ? 'active' : 'todo';
-    const prog = state === 'active' ? progressBar(goalValue(s, g) / goalTarget(g)) : '';
-    return `<li class="${state}"><span class="tick">${state === 'done' ? '✓' : i + 1}</span><div><div>${esc(goalText(g))}</div>
-      ${state === 'active' ? `<div class="goal-row">${prog}<small>${goalProgressText(s, g)}</small></div>` : ''}</div></li>`;
-  }).join('');
+  // Compact: the current goal in full, the rest as numbered steps (full list on the Clients screen).
+  const g = c.goals[s.goalIndex];
+  const steps = c.goals.map((_, i) => `<i class="${i < s.goalIndex ? 'done' : i === s.goalIndex ? 'active' : ''}">${i < s.goalIndex ? '✓' : i + 1}</i>`).join('');
   return `<div class="card client">
-    <div class="eyebrow">Client ${c.id} / 25 · ${esc(c.pushes)}</div>
+    <div class="client-top"><div class="eyebrow">Client ${c.id} / 25 · ${esc(c.pushes)}</div><div class="steps">${steps}</div></div>
     <h3>${esc(c.name)}</h3>
-    <p class="quirk">${esc(c.quirkText)}</p>
-    <ol class="goals">${goals}</ol>
+    <p class="quirk" title="${esc(c.blurb)}">${esc(c.quirkText)}</p>
+    ${g ? `<div class="goal-now"><div><span class="eyebrow">Goal ${s.goalIndex + 1}</span> ${esc(goalText(g))}</div>
+      <div class="goal-row">${progressBar(goalValue(s, g) / goalTarget(g))}<small>${goalProgressText(s, g)}</small></div></div>` : ''}
     <div class="reward">Reward: ${rewardText(c)}</div>
   </div>`;
 }
@@ -107,10 +105,10 @@ export function sideCard(s: GameState): string {
   if (!s.side.length) return '';
   const rows = s.side.map((o) => {
     const left = Math.max(0, TUNING.sideObjectiveRotate - (s.playTime - o.started));
-    return `<li><div class="side-top"><span>${esc(sideText(o))}</span><em>${o.reward === 'lab' ? '+1 LP' : '×2 60s'}</em></div>
-      ${progressBar(o.progress / o.target, 'thin')}<small class="muted">rotates in ${fmtTime(left)}</small></li>`;
+    return `<li title="Swaps for a new one in ${fmtTime(left)}"><div class="side-top"><span>${esc(sideText(o))}</span><em>${o.reward === 'lab' ? '+1 LP' : '×2 60s'}</em></div>
+      ${progressBar(o.progress / o.target, 'thin')}</li>`;
   }).join('');
-  return `<div class="card side"><div class="eyebrow">Side objectives</div><ul class="side-list">${rows}</ul></div>`;
+  return `<div class="side"><div class="eyebrow">Side objectives</div><ul class="side-list">${rows}</ul></div>`;
 }
 
 export function tipBanner(bn: Bottleneck[]): string {
@@ -208,8 +206,7 @@ export function upgradeCards(s: GameState, ui: UiState, bn: Bottleneck[]): strin
     const scope = it.scope === 'node' ? `<span class="scope">${node.label}</span>` : '<span class="scope rig">RIG</span>';
     return `<div class="up-card ${red ? 'red' : ''} ${maxed ? 'maxed' : ''}">
       ${red ? '<div class="flag">BOTTLENECK</div>' : ''}
-      <div class="up-head">${scope}<b>${esc(it.name)}</b></div>
-      <div class="up-lv">LV ${lvl}${max < 1000 ? ` / ${max}` : ''}</div>
+      <div class="up-head">${scope}<b>${esc(it.name)}</b><span class="up-lv">LV ${lvl}${max < 1000 ? `/${max}` : ''}</span></div>
       <div class="up-val">${maxed ? `<span>${cur}</span>` : `${cur} → <span>${next}</span>`} <small>${UNIT[it.id] ?? ''}</small></div>
       <div class="up-trade">${esc(it.tradeoff)}</div>
       <button class="buy ${afford ? '' : 'poor'}" data-action="buy" data-item="${it.id}" ${maxed || !afford ? 'disabled' : ''}>
@@ -231,14 +228,14 @@ export function clientsScreen(s: GameState): string {
     }).join('');
     return `<div class="client-row ${state}">
       <div class="num">${state === 'done' ? '✓' : c.id}</div>
-      <div class="body"><h4>${esc(c.name)} ${state === 'active' ? '<span class="pill">SERVING NOW</span>' : ''}</h4>
-        <p>${esc(c.blurb)}</p><p class="quirk">${esc(c.quirkText)}</p>
-        ${state === 'locked' ? '' : `<ul class="goals-mini">${goals}</ul>`}
+      <div class="body"><h4>${esc(c.name)}</h4>${state === 'active' ? '<span class="pill">SERVING NOW</span>' : state === 'done' ? '<span class="pill done">DONE</span>' : '<span class="pill locked">UP NEXT</span>'}
+        ${state === 'active' ? `<p class="blurb">${esc(c.blurb)}</p>` : ''}<p class="quirk" title="${esc(c.blurb)}">${esc(c.quirkText)}</p>
+        <ul class="goals-mini">${goals}</ul>
         <div class="reward">Reward: ${rewardText(c)}</div></div></div>`;
   }).join('');
-  const future = FUTURE_CLIENTS.map((f) => `<div class="future"><h4>${f.stage}</h4><div>${f.names.map((n) => `<span class="locked-name">🔒 ${esc(n)}</span>`).join('')}</div></div>`).join('');
+  const future = FUTURE_CLIENTS.map((f) => `<div class="future"><h4>${f.stage}</h4>${f.names.map((n) => `<span class="locked-name">🔒 ${esc(n)}</span>`).join('')}</div>`).join('');
   return `<div class="screen-head"><h2>Clients</h2><p class="muted">One client at a time. Finish all five to complete the Chip Stage.</p></div>
-    <div class="client-path">${list}</div><h3 class="sub">Coming in later stages</h3>${future}`;
+    <div class="client-grid">${list}</div><h3 class="sub">Coming in later stages</h3><div class="future-grid">${future}</div>`;
 }
 
 export function labScreen(s: GameState): string {
@@ -247,9 +244,11 @@ export function labScreen(s: GameState): string {
     const maxed = lvl >= r.maxLevel;
     const locked = r.requires && !(s.research[r.requires] ?? 0);
     const can = canResearch(s, r.id);
+    const pips = Array.from({ length: r.maxLevel }, (_, i) => `<i class="${i < lvl ? 'on' : ''}"></i>`).join('');
     return `<div class="lab-card ${maxed ? 'maxed' : ''} ${locked ? 'locked' : ''}">
-      <h4>${esc(r.name)}</h4><p>${esc(r.text)}</p>
-      <div class="lab-lv">${r.maxLevel > 1 ? `Level ${lvl} / ${r.maxLevel}` : maxed ? 'Researched' : 'Not researched'}</div>
+      <div class="lab-top"><h4>${esc(r.name)}</h4><span class="lab-lv">${r.maxLevel > 1 ? `LV ${lvl}/${r.maxLevel}` : maxed ? 'DONE' : 'ONE-OFF'}</span></div>
+      <p>${esc(r.text)}</p>
+      <div class="pips">${pips}</div>
       <button class="buy lab ${can ? '' : 'poor'}" data-action="research" data-research="${r.id}" ${can ? '' : 'disabled'}>
         ${maxed ? 'DONE' : locked ? `Needs ${esc(RESEARCH.find((x) => x.id === r.requires)!.name)}` : `${r.cost(lvl)} LP`}</button></div>`;
   }).join('');
@@ -261,9 +260,9 @@ export function teamScreen(s: GameState): string {
   const slots = SECTIONS.map((sec) => {
     const t = s.talentSlots[sec.id];
     return `<div class="slot"><div class="eyebrow">${sec.name}</div>${t
-      ? `<div class="avatar">${initials(talentDef(t).name)}</div><b>${esc(talentDef(t).name)}</b><small class="green">${esc(talentDef(t).boostText)}</small>
-         <button class="ghost" data-action="unassign" data-section="${sec.id}">Remove</button>`
-      : '<div class="avatar empty">+</div><small class="muted">Empty slot</small>'}</div>`;
+      ? `<div class="avatar">${initials(talentDef(t).name)}</div><div><b>${esc(talentDef(t).name)}</b><small class="green">${esc(talentDef(t).boostText)}</small></div>
+         <button class="ghost x" data-action="unassign" data-section="${sec.id}" title="Remove">✕</button>`
+      : '<div class="avatar empty">+</div><div><small class="muted">Empty slot</small></div>'}</div>`;
   }).join('');
   const roster = TALENT.map((t) => {
     const owned = s.talentOwned.includes(t.id);
@@ -278,15 +277,14 @@ export function teamScreen(s: GameState): string {
     const owned = s.modelsOwned.includes(m.id);
     const running = s.model === m.id;
     return `<div class="model ${owned ? '' : 'locked'} ${running ? 'running' : ''}">
-      <h4>${m.name} <span>${m.size}</span></h4><p>${owned ? esc(m.blurb) : 'Unlocked by a client'}</p>
-      <dl><dt>Tokens / request</dt><dd>${m.tokPerReq}</dd><dt>Pay</dt><dd>×${m.priceMult}</dd>
-      <dt>Compute / token</dt><dd>×${m.computeCost}</dd><dt>Memory / token</dt><dd>×${m.memCost}</dd></dl>
+      <div class="model-text"><h4>${m.name} <span>${m.size}</span></h4><p>${owned ? esc(m.blurb) : 'Unlocked by a client'}</p>
+      <div class="stats"><span>${m.tokPerReq} tok/req</span><span>pay ×${m.priceMult}</span><span>compute ×${m.computeCost}</span><span>memory ×${m.memCost}</span></div></div>
       ${owned ? `<button data-action="model" data-model="${m.id}" ${running ? 'disabled' : ''}>${running ? 'RUNNING' : 'Run this model'}</button>` : '<button disabled>🔒 Locked</button>'}</div>`;
   }).join('');
   return `<div class="screen-head"><h2>Team &amp; Models</h2><p class="muted">Talent boosts one Section each. Bigger models pay more per request but need more compute and memory.</p></div>
     <h3 class="sub">On the rig</h3><div class="slots">${slots}</div>
-    <h3 class="sub">Talent</h3><div class="talent-list">${roster}</div>
-    <h3 class="sub">Models</h3><div class="model-list">${models}</div>`;
+    <div class="team-cols"><div><h3 class="sub">Talent</h3><div class="talent-list">${roster}</div></div>
+    <div><h3 class="sub">Models</h3><div class="model-list">${models}</div></div></div>`;
 }
 
 const initials = (n: string) => n.split(/\s+/).filter((w) => /^[A-Z]/.test(w)).map((w) => w[0]).slice(0, 2).join('');
