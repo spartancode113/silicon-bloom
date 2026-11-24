@@ -277,3 +277,20 @@ h3.sub { margin: 16px 0 10px; font-size: 12px; letter-spacing: .2em; text-transf
 .cl small { font-size: 9px; color: var(--muted); }
 .cl.active { border-color: var(--green); color: var(--green); box-shadow: 0 0 10px rgba(62,224,143,.3); }
 .cl.locked { border-style: dashed; opacity: .5; }
+
+/* Lab slots: research runs on a timer, one job per slot. */
+.lab-slots { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
+.slot { border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; background: var(--panel); display: flex; flex-direction: column; gap: 4px; min-width: 0; height: 84px; }
+.slot .slot-n { font-size: 10px; letter-spacing: .12em; color: var(--muted); }
+.slot b { font-size: 14px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.slot small { font-size: 11px; color: var(--muted); }
+.slot.busy { border-color: var(--magenta); box-shadow: 0 0 12px rgba(214, 120, 255, .18) inset; }
+.slot.busy b { color: var(--magenta); }
+.slot.idle b { color: var(--cyan); }
+.slot.locked { border-style: dashed; }
+.slot.locked.dim { opacity: .5; }
+.slot .bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.slot .bar i { display: block; height: 100%; background: var(--magenta); box-shadow: 0 0 6px var(--magenta); }
+.slot .buy { margin-top: auto; padding: 5px 8px; font-size: 12px; }
+.pips i.run { background: repeating-linear-gradient(90deg, var(--magenta) 0 4px, transparent 4px 8px); opacity: .8; }
+.buy.lab.busy { background: linear-gradient(90deg, rgba(214,120,255,.45) var(--p), #13212a var(--p)); color: var(--text); }

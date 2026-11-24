@@ -15,6 +15,7 @@ export function deserialise(text: string | null): GameState | null {
     if (!data || data.version !== 1 || typeof data.playTime !== 'number') return null;
     // Fill any fields added since the save was written.
     const s: GameState = { ...newGame(), ...data };
+    if (typeof data.demandLevel !== 'number') s.demandLevel = s.goalsCompleted;
     // Saves from before core clusters: move chip cores/clock into cluster 1.
     for (const n of s.nodes) {
       if (!Array.isArray(n.clusters)) {

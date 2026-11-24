@@ -3,8 +3,8 @@
 // Run: npm run balance
 import { ITEMS, MODELS, NODES, RESEARCH, STAGE_1_CLIENTS, type ItemId, type NodeId, type SectionId } from '../src/sim/data';
 import {
-  assignTalent, buy, canFab, canResearch, clickProcess, costOf, currentGoal, doResearch, fabNode,
-  bottlenecks, fmtMoney, fmtNum, fmtTime, goalText, itemsFor, level, maxLevelOf, rigStats, setModel, tick, type GameEvent,
+  assignTalent, buy, buyLabSlot, canFab, canResearch, clickProcess, costOf, currentGoal, doResearch, fabNode,
+  bottlenecks, fmtMoney, fmtNum, fmtTime, goalText, itemsFor, labSlotCost, level, maxLevelOf, rigStats, setModel, tick, type GameEvent,
 } from '../src/sim/engine';
 import { newGame, type GameState } from '../src/sim/state';
 import type { Bottleneck } from '../src/sim/engine';
@@ -91,6 +91,9 @@ function goalDirected(s: GameState): boolean {
 }
 
 function decide(s: GameState) {
+  // An extra Lab slot once it is cheap relative to cash.
+  const slot = labSlotCost(s);
+  if (slot !== null && s.cash > slot * 4) buyLabSlot(s);
   // Lab first: node research, then pricing/reach/efficiency.
   const nodePending = (['node7', 'node5', 'node3'] as const).find((id) => !(s.research[id] ?? 0));
   if (nodePending) { if (canResearch(s, nodePending)) doResearch(s, nodePending); }
@@ -151,7 +154,17 @@ let lastClient = -1;
 const log: string[] = [];
 let lastGoalLog = '';
 const LIMIT = Number(process.env.LIMIT ?? 4 * 3600);
+let reds = new Set<string>();
+let onsets = 0;
+let redTime = 0;
+const bySys: Record<string, number> = {};
 while (!s.stageComplete && s.playTime < LIMIT) {
+  if (level(s, 'scheduler') > 0) {
+    const now = new Set(bottlenecks(s, rigStats(s)).filter((b) => b.severity === 'red').map((b) => `${b.system}:${b.node ?? ''}`));
+    for (const k of now) if (!reds.has(k)) { onsets++; const sys = k.split(':')[0]; bySys[sys] = (bySys[sys] ?? 0) + 1; }
+    if (now.size) redTime += DT;
+    reds = now;
+  }
   if (level(s, 'scheduler') === 0 && Math.floor(s.playTime * 10) % 3 === 0) clickProcess(s, events);
   tick(s, DT, events);
   if (s.playTime >= nextDecision) { decide(s); nextDecision += DECIDE_EVERY; }
@@ -173,6 +186,7 @@ if (process.env.EVENTS) for (const e of events) console.log(e.text);
 const r = rigStats(s);
 console.log('---');
 console.log(`Finished: ${s.stageComplete} at ${fmtTime(s.playTime)}`);
+console.log(`Bottlenecks: ${onsets} new reds, one every ${fmtNum(s.playTime / Math.max(1, onsets))}s · red ${Math.round((redTime / s.playTime) * 100)}% of the time · Lab slots ${s.labSlots} · ${JSON.stringify(bySys)}`);
 console.log(`Nodes: ${s.nodes.map((n) => nodeDef(n.id).label).join(', ')} · cap ${fmtNum(r.capTok)} tok/s · demand ${fmtNum(r.demand)} req/s · model ${s.model}`);
 console.log(`Research: ${JSON.stringify(s.research)} · Lab left ${s.lab}`);
 for (const n of s.nodes) console.log(`  ${nodeDef(n.id).label}: ${JSON.stringify(n.levels)} clusters ${JSON.stringify(n.clusters)}`);

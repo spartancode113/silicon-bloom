@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  bottlenecks, buy, canFab, clickProcess, currentGoal, doResearch, fabNode, level, resetUtilCache, rigStats, tick,
+  bottlenecks, buy, buyLabSlot, canFab, canResearch, clickProcess, demandNow, currentGoal, doResearch, fabNode, level, resetUtilCache, rigStats, tick,
   type GameEvent,
 } from './engine';
 import { newGame, type GameState } from './state';
@@ -10,6 +10,7 @@ let s: GameState;
 beforeEach(() => { resetUtilCache(); s = newGame(1); });
 
 const run = (secs: number, ev: GameEvent[] = []) => { for (let t = 0; t < secs; t += 0.1) tick(s, 0.1, ev); };
+const finishLab = () => run(Math.max(0, ...s.labJobs.map((j) => j.started + j.duration - s.playTime)) + 0.2);
 
 describe('early game', () => {
   it('only earns from clicks until the Auto-scheduler is bought', () => {
@@ -77,7 +78,7 @@ describe('bottlenecks', () => {
 
   it('flags intake when users outnumber what the network lets in', () => {
     s.rigLevels.scheduler = 1;
-    s.goalsCompleted = 6;
+    s.goalsCompleted = 6; s.demandLevel = 6;
     const b = bottlenecks(s, rigStats(s));
     expect(b.some((x) => x.system === 'intake' && x.severity === 'red')).toBe(true);
   });
@@ -99,13 +100,16 @@ describe('process nodes', () => {
     s.lab = 10;
     expect(doResearch(s, 'node7')).toBe(true);
     s.cash = 1e6;
+    expect(canFab(s, 'n7').ok).toBe(false); // still researching
+    finishLab();
+    s.cash = 1e6;
     expect(fabNode(s, 'n7')).toBe(true);
     expect(s.nodes.map((n) => n.id)).toEqual(['n14', 'n7']);
     expect(level(s, 'cores', 'n7')).toBe(0);
   });
 
   it('older chips keep earning alongside newer ones', () => {
-    s.lab = 10; doResearch(s, 'node7'); s.cash = 1e6; fabNode(s, 'n7');
+    s.lab = 10; doResearch(s, 'node7'); finishLab(); s.cash = 1e6; fabNode(s, 'n7');
     const r = rigStats(s);
     expect(r.nodes.every((n) => n.cap > 0)).toBe(true);
     expect(r.nodeCapTotal).toBeCloseTo(r.nodes[0].cap + r.nodes[1].cap);
@@ -136,6 +140,41 @@ describe('core clusters', () => {
   it('a chip cannot hold more clusters than its design allows', () => {
     s.cash = 1e12;
     expect(buy(s, 'cluster', 'n14', 10)).toBe(1); // 14nm holds 2
+  });
+});
+
+describe('lab queue', () => {
+  it('research takes time and runs two at once', () => {
+    s.lab = 50;
+    expect(doResearch(s, 'billing')).toBe(true);
+    expect(s.research.billing ?? 0).toBe(0);
+    expect(canResearch(s, 'billing')).toBe(false); // one level at a time
+    expect(doResearch(s, 'reach')).toBe(true);
+    expect(doResearch(s, 'efficiency')).toBe(false); // both slots busy
+    finishLab();
+    expect(s.research.billing).toBe(1);
+    expect(s.research.reach).toBe(1);
+    expect(s.labJobs).toHaveLength(0);
+  });
+
+  it('extra slots cost cash and let more run at once', () => {
+    s.lab = 50;
+    expect(buyLabSlot(s)).toBe(false);
+    s.cash = 1e6;
+    expect(buyLabSlot(s)).toBe(true);
+    expect(buyLabSlot(s)).toBe(true);
+    expect(buyLabSlot(s)).toBe(false); // four is the most
+    for (const id of ['billing', 'reach', 'efficiency', 'node7'] as const) expect(doResearch(s, id)).toBe(true);
+  });
+});
+
+describe('pacing', () => {
+  it('demand eases up after a goal instead of jumping', () => {
+    const before = demandNow(s).demand;
+    s.goalsCompleted = 1;
+    expect(demandNow(s).demand).toBeCloseTo(before);
+    run(60);
+    expect(demandNow(s).demand).toBeGreaterThan(before * 1.3);
   });
 });
 

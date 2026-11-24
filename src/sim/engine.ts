@@ -1,5 +1,5 @@
 import {
-  ITEMS, NODES, STAGE_1_CLIENTS, TUNING,
+  ITEMS, LAB_SLOT_COSTS, LAB_START_SLOTS, NODES, STAGE_1_CLIENTS, TUNING,
   itemDef, modelDef, nodeDef, researchDef,
   type ClientDef, type GoalDef, type ItemDef, type ItemId, type ModelId, type NodeDef,
   type NodeId, type ResearchId, type SectionId, type TalentId,
@@ -90,7 +90,7 @@ function nodeStats(s: GameState, ns: NodeState, util: number): NodeStats {
   const npu = lv('npu');
 
   const heat = raw.reduce((a, c) => a + c.cores * Math.pow(c.clock, 1.5), 0) * def.heatPerCoreGHz * eff * (1 + 0.04 * npu);
-  const cool = def.coolBase * Math.pow(1.15, lv('heatsink')) * Math.pow(1.05, lv('fan'));
+  const cool = def.coolBase * Math.pow(TUNING.capacityStep, lv('heatsink')) * Math.pow(1.05, lv('fan'));
   const thermalFactor = heat > cool ? Math.pow(cool / heat, 2 / 3) : 1;
   const clusters: ClusterStats[] = raw.map((c) => ({ ...c, effClock: c.clock * thermalFactor }));
   const coreGHz = clusters.reduce((a, c) => a + c.cores * c.effClock, 0);
@@ -101,11 +101,11 @@ function nodeStats(s: GameState, ns: NodeState, util: number): NodeStats {
     (client?.quirk.powerMult ?? 1) * (hasTalent(s, 'sal') ? 0.9 : 1);
   const dynamic = (coreGHz * def.powerPerCoreGHz + lv('fan') * 0.4 * def.idlePower / 5 + lv('l3') * def.idlePower * 0.05) * powerMult;
   const power = dynamic + def.idlePower;
-  const supply = def.psuBase * Math.pow(1.15, lv('psu'));
+  const supply = def.psuBase * Math.pow(TUNING.capacityStep, lv('psu'));
   const powerFactor = power > supply ? Math.max(0.05, (supply - def.idlePower) / dynamic) : 1;
 
   const computeTok = coreGHz * Math.min(1, powerFactor) * def.tokPerCoreGHz * (1 + 0.12 * npu) / model.computeCost;
-  const memCap = def.memBase * Math.pow(1.15, lv('memory')) * Math.pow(1.06, lv('l3')) / (model.memCost * (client?.quirk.memMult ?? 1));
+  const memCap = def.memBase * Math.pow(TUNING.capacityStep, lv('memory')) * Math.pow(1.06, lv('l3')) / (model.memCost * (client?.quirk.memMult ?? 1));
   const cap = Math.min(computeTok, memCap);
 
   const heatRatio = Math.min(1, heat / cool);
@@ -122,7 +122,7 @@ function nodeStats(s: GameState, ns: NodeState, util: number): NodeStats {
 
 export function demandNow(s: GameState): { demand: number; bursting: boolean } {
   const client = currentClient(s);
-  let demand = TUNING.baseDemand * Math.pow(TUNING.demandPerGoal, s.goalsCompleted) *
+  let demand = TUNING.baseDemand * Math.pow(TUNING.demandPerGoal, Math.min(s.demandLevel, s.goalsCompleted)) *
     (1 + TUNING.reachPerLevel * research(s, 'reach')) * (client?.quirk.demandMult ?? 1);
   let bursting = false;
   const b = client?.quirk.bursts;
@@ -188,7 +188,7 @@ export function bottlenecks(s: GameState, r: RigStats): Bottleneck[] {
     out.push({ system: 'scheduler', severity: 'red', section: 'compute', item: 'scheduler', tip: 'Processing is manual. Click the chip, or buy the Auto-scheduler.' });
     return out;
   }
-  if (r.demand > r.intakeCap * 1.001) {
+  if (r.demand > r.intakeCap / TUNING.slack) {
     out.push({ system: 'intake', severity: 'red', section: 'network', item: 'intake',
       tip: `Users want ${fmtNum(r.demand)} req/s but intake only lets in ${fmtNum(r.intakeCap)}. Upgrade Request intake.` });
   }
@@ -217,17 +217,17 @@ function nodeLimit(s: GameState, n: NodeStats): Bottleneck | null {
   const tag = n.def.label;
   const maxed = (items: ItemId[]) => items.every((i) => !itemsFor(n.def, itemDef(i).section).some((x) => x.id === i) || level(s, i, n.id) >= maxLevelOf(i, n.id));
   // A chip that is fully upgraded in the limiting area is done, not a bottleneck.
-  if (n.thermalFactor < 0.97 && maxed(['heatsink', 'fan'])) return null;
-  if (n.thermalFactor >= 0.97 && n.powerFactor < 0.97 && maxed(['psu', 'vrm'])) return null;
-  if (n.thermalFactor < 0.97) {
+  if (n.thermalFactor < TUNING.slack && maxed(['heatsink', 'fan'])) return null;
+  if (n.thermalFactor >= TUNING.slack && n.powerFactor < TUNING.slack && maxed(['psu', 'vrm'])) return null;
+  if (n.thermalFactor < TUNING.slack) {
     return { system: 'thermal', severity: 'red', section: 'thermal', item: 'heatsink', node: n.id,
       tip: `${tag} chip is at ${TUNING.throttleTemp}°: clock throttled ${Math.round((1 - n.thermalFactor) * 100)}%. Upgrade cooling.` };
   }
-  if (n.powerFactor < 0.97) {
+  if (n.powerFactor < TUNING.slack) {
     return { system: 'power', severity: 'red', section: 'power', item: 'psu', node: n.id,
       tip: `${tag} chip needs ${fmtNum(n.power)} W but the PSU gives ${fmtNum(n.supply)} W. Cores are capped. Upgrade the PSU.` };
   }
-  if (n.memCap < n.computeTok && !maxed(['memory', 'l3'])) {
+  if (n.memCap < n.computeTok * TUNING.slack && !maxed(['memory', 'l3'])) {
     return { system: 'memory', severity: 'red', section: 'compute', item: 'memory', node: n.id,
       tip: `${tag} memory can only feed ${fmtNum(n.memCap)} tok/s; the cores could do ${fmtNum(n.computeTok)}. Upgrade Memory.` };
   }
@@ -312,20 +312,46 @@ export function fabNode(s: GameState, id: NodeId, events: GameEvent[] = []): boo
   return true;
 }
 
+export const labJob = (s: GameState, id: ResearchId) => s.labJobs.find((j) => j.research === id);
+
 export function canResearch(s: GameState, id: ResearchId): boolean {
   const def = researchDef(id);
   const lvl = research(s, id);
   if (lvl >= def.maxLevel) return false;
+  if (labJob(s, id)) return false; // one level at a time
+  if (s.labJobs.length >= s.labSlots) return false;
   if (def.requires && !research(s, def.requires)) return false;
   return s.lab >= def.cost(lvl);
 }
 
+/** Starts research on a free Lab slot. It finishes after its time in play seconds. */
 export function doResearch(s: GameState, id: ResearchId): boolean {
   if (!canResearch(s, id)) return false;
+  const def = researchDef(id);
   const lvl = research(s, id);
-  s.lab -= researchDef(id).cost(lvl);
-  s.research[id] = lvl + 1;
+  s.lab -= def.cost(lvl);
+  s.labJobs.push({ research: id, started: s.playTime, duration: def.time(lvl) });
   return true;
+}
+
+export const labSlotCost = (s: GameState): number | null =>
+  LAB_SLOT_COSTS[s.labSlots - LAB_START_SLOTS] ?? null;
+
+export function buyLabSlot(s: GameState): boolean {
+  const cost = labSlotCost(s);
+  if (cost === null || s.cash < cost) return false;
+  s.cash -= cost;
+  s.labSlots += 1;
+  return true;
+}
+
+function updateLab(s: GameState, events: GameEvent[]) {
+  for (const j of [...s.labJobs]) {
+    if (s.playTime < j.started + j.duration) continue;
+    s.labJobs.splice(s.labJobs.indexOf(j), 1);
+    s.research[j.research] = research(s, j.research) + 1;
+    events.push({ kind: 'info', text: `Research complete: ${researchDef(j.research).name}.` });
+  }
 }
 
 export function setModel(s: GameState, id: ModelId): boolean {
@@ -377,6 +403,9 @@ export function tick(s: GameState, dt: number, events: GameEvent[] = []): RigSta
   const share = r.capTok > 0 ? Math.min(1, rate / r.capTok) : 0;
   for (const n of r.nodes) lastUtil.set(n.id, r.scheduler ? share : Math.min(1, s.queue > 0 ? 0.15 : 0));
 
+  // Demand eases up over ~40s after each goal instead of jumping at once.
+  s.demandLevel = Math.min(s.goalsCompleted, s.demandLevel + dt / TUNING.demandRampSeconds);
+  updateLab(s, events);
   trackBursts(s, r, events);
   trackTimedGoals(s, r, dt, events);
   checkGoal(s, events);

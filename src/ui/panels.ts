@@ -2,11 +2,11 @@
 // Each region re-renders only when its HTML changes, so buttons stay clickable.
 import {
   FUTURE_CLIENTS, MODELS, NODES, RESEARCH, SECTIONS, STAGE_1_CLIENTS, TALENT, TUNING,
-  modelDef, nodeDef, talentDef,
+  LAB_SLOT_COSTS, LAB_START_SLOTS, modelDef, nodeDef, researchDef, talentDef,
   type ClientDef, type GoalDef, type ItemId, type NodeId, type SectionId,
 } from '../sim/data';
 import {
-  canFab, canResearch, costOf, currentClient, fmtMoney, fmtNum, fmtTime, goalTarget, goalText, goalValue,
+  canFab, canResearch, costOf, labJob, labSlotCost, currentClient, fmtMoney, fmtNum, fmtTime, goalTarget, goalText, goalValue,
   itemsFor, level, maxLevelOf, sideText,
   type Bottleneck, type RigStats,
 } from '../sim/engine';
@@ -26,7 +26,30 @@ const cache = new Map<HTMLElement, string>();
 export function setHtml(el: HTMLElement, html: string) {
   if (cache.get(el) === html) return;
   cache.set(el, html);
-  el.innerHTML = html;
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  morphChildren(el, tpl.content);
+}
+
+// Patch the live DOM to match the new markup in place, so a button being
+// clicked is not swapped out from under the pointer when a timer ticks.
+function morphChildren(into: Node, from: Node) {
+  const want = Array.from(from.childNodes);
+  for (let i = 0; i < want.length; i++) {
+    const cur = into.childNodes[i];
+    const next = want[i];
+    if (!cur) { into.appendChild(next.cloneNode(true)); continue; }
+    if (cur.nodeType !== next.nodeType || cur.nodeName !== next.nodeName) { into.replaceChild(next.cloneNode(true), cur); continue; }
+    if (cur.nodeType !== Node.ELEMENT_NODE) {
+      if (cur.nodeValue !== next.nodeValue) cur.nodeValue = next.nodeValue;
+      continue;
+    }
+    const a = cur as Element, b = next as Element;
+    for (const at of Array.from(a.attributes)) if (!b.hasAttribute(at.name)) a.removeAttribute(at.name);
+    for (const at of Array.from(b.attributes)) if (a.getAttribute(at.name) !== at.value) a.setAttribute(at.name, at.value);
+    morphChildren(a, b);
+  }
+  while (into.childNodes.length > want.length) into.removeChild(into.lastChild!);
 }
 
 // ---------------------------------------------------------------------------
@@ -259,21 +282,48 @@ export function clientsScreen(s: GameState): string {
 }
 
 export function labScreen(s: GameState): string {
+  const free = s.labJobs.length < s.labSlots;
   const cards = RESEARCH.map((r) => {
     const lvl = s.research[r.id] ?? 0;
     const maxed = lvl >= r.maxLevel;
     const locked = r.requires && !(s.research[r.requires] ?? 0);
+    const job = labJob(s, r.id);
     const can = canResearch(s, r.id);
-    const pips = Array.from({ length: r.maxLevel }, (_, i) => `<i class="${i < lvl ? 'on' : ''}"></i>`).join('');
-    return `<div class="lab-card ${maxed ? 'maxed' : ''} ${locked ? 'locked' : ''}">
+    const pips = Array.from({ length: r.maxLevel }, (_, i) => `<i class="${i < lvl ? 'on' : job && i === lvl ? 'run' : ''}"></i>`).join('');
+    let label: string;
+    if (maxed) label = 'DONE';
+    else if (job) label = `Researching · ${fmtTime(Math.max(0, job.started + job.duration - s.playTime))}`;
+    else if (locked) label = `Needs ${esc(RESEARCH.find((x) => x.id === r.requires)!.name)}`;
+    else if (!free) label = 'All slots busy';
+    else label = `Start · ${r.cost(lvl)} LP · ${fmtTime(r.time(lvl))}`;
+    const pct = job ? Math.round(Math.min(100, ((s.playTime - job.started) / job.duration) * 100)) : 0;
+    return `<div class="lab-card ${maxed ? 'maxed' : ''} ${locked ? 'locked' : ''} ${job ? 'running' : ''}">
       <div class="lab-top"><h4>${esc(r.name)}</h4><span class="lab-lv">${r.maxLevel > 1 ? `LV ${lvl}/${r.maxLevel}` : maxed ? 'DONE' : 'ONE-OFF'}</span></div>
       <p>${esc(r.text)}</p>
       <div class="pips">${pips}</div>
-      <button class="buy lab ${can ? '' : 'poor'}" data-action="research" data-research="${r.id}" ${can ? '' : 'disabled'}>
-        ${maxed ? 'DONE' : locked ? `Needs ${esc(RESEARCH.find((x) => x.id === r.requires)!.name)}` : `${r.cost(lvl)} LP`}</button></div>`;
+      <button class="buy lab ${can ? '' : 'poor'} ${job ? 'busy' : ''}" data-action="research" data-research="${r.id}" ${can ? '' : 'disabled'} style="--p:${pct}%">${label}</button></div>`;
   }).join('');
-  return `<div class="screen-head"><h2>Lab</h2><p class="muted">Spend Lab Points from client goals and side objectives. Research lasts for this game.</p>
-    <div class="lp">${s.lab} Lab Points</div></div><div class="lab-grid">${cards}</div>`;
+
+  const slots = Array.from({ length: LAB_START_SLOTS + LAB_SLOT_COSTS.length }, (_, i) => {
+    if (i < s.labSlots) {
+      const j = s.labJobs[i];
+      if (!j) return `<div class="slot idle"><span class="slot-n">SLOT ${i + 1}</span><b>Idle</b><small>Pick research below</small></div>`;
+      const pct = Math.round(Math.min(100, ((s.playTime - j.started) / j.duration) * 100));
+      const left = Math.max(0, j.started + j.duration - s.playTime);
+      return `<div class="slot busy"><span class="slot-n">SLOT ${i + 1}</span><b>${esc(researchDef(j.research).name)}</b>
+        <div class="bar"><i style="width:${pct}%"></i></div><small>${fmtTime(left)} left</small></div>`;
+    }
+    if (i === s.labSlots) {
+      const cost = labSlotCost(s)!;
+      const ok = s.cash >= cost;
+      return `<div class="slot locked"><span class="slot-n">SLOT ${i + 1}</span><b>Locked</b>
+        <button class="buy ${ok ? '' : 'poor'}" data-action="lab-slot" ${ok ? '' : 'disabled'}>Unlock · ${fmtMoney(cost)}</button></div>`;
+    }
+    return `<div class="slot locked dim"><span class="slot-n">SLOT ${i + 1}</span><b>Locked</b><small>Unlock slot ${i} first</small></div>`;
+  }).join('');
+
+  return `<div class="screen-head"><h2>Lab</h2><p class="muted">Spend Lab Points to start research. Each takes time to finish, one job per slot. Research lasts for this game.</p>
+    <div class="lp">${s.lab} Lab Points</div></div><div class="lab-slots">${slots}</div><div class="lab-grid">${cards}</div>`;
 }
 
 export function teamScreen(s: GameState): string {

@@ -22,6 +22,12 @@ export interface SideObjective {
   reward: 'lab' | 'boost';
 }
 
+export interface LabJob {
+  research: ResearchId;
+  started: number; // play time
+  duration: number; // seconds
+}
+
 export interface GameState {
   version: 1;
   playTime: number; // seconds, only counts while unpaused
@@ -31,6 +37,9 @@ export interface GameState {
   rigLevels: Partial<Record<ItemId, number>>; // upgrades shared by the rig
   selectedNode: NodeId;
   research: Partial<Record<ResearchId, number>>;
+  labJobs: LabJob[]; // research in progress, one per slot
+  labSlots: number;
+  demandLevel: number; // eases toward goalsCompleted so demand ramps instead of jumping
   clientIndex: number; // index into STAGE_1_CLIENTS
   goalIndex: number;
   goalProgress: number;
@@ -63,6 +72,9 @@ export function newGame(seed = Date.now() % 100000): GameState {
     rigLevels: {},
     selectedNode: 'n14',
     research: {},
+    labJobs: [],
+    labSlots: 2,
+    demandLevel: 0,
     clientIndex: 0,
     goalIndex: 0,
     goalProgress: 0,

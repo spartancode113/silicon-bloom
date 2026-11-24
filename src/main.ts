@@ -2,7 +2,7 @@ import './style.css';
 import type { ItemId, ModelId, NodeId, ResearchId, SectionId, TalentId } from './sim/data';
 import { talentDef } from './sim/data';
 import {
-  assignTalent, bottlenecks, buy, selectCluster, clickProcess, doResearch, fabNode, resetUtilCache, rigStats, setModel, tick,
+  assignTalent, bottlenecks, buy, buyLabSlot, selectCluster, clickProcess, doResearch, fabNode, resetUtilCache, rigStats, setModel, tick,
   type GameEvent, type RigStats,
 } from './sim/engine';
 import { newGame, type GameState } from './sim/state';
@@ -153,7 +153,8 @@ const actions: Record<string, (d: DOMStringMap) => void> = {
     flushEvents();
   },
   fab: (d) => { if (fabNode(game, d.node as NodeId, events)) { stats = rigStats(game); flushEvents(); } },
-  research: (d) => { if (doResearch(game, d.research as ResearchId)) toast('Research complete.', 'info'); },
+  research: (d) => { if (doResearch(game, d.research as ResearchId)) toast('Research started.', 'info'); },
+  'lab-slot': () => { if (buyLabSlot(game)) toast('New Lab slot unlocked.', 'info'); },
   model: (d) => { setModel(game, d.model as ModelId); stats = rigStats(game); },
   assign: (d) => { const t = d.talent as TalentId; assignTalent(game, talentDef(t).section, t); },
   unassign: (d) => { assignTalent(game, d.section as SectionId, null); },

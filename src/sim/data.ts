@@ -62,16 +62,16 @@ export const ITEMS: ItemDef[] = [
   { id: 'cores', name: 'Cores', section: 'compute', scope: 'cluster', baseCost: 3, growth: 1.9, maxLevel: (n) => (n ? n.coresPerCluster - 1 : 0), tradeoff: 'more cores, more heat and power' },
   { id: 'clock', name: 'Clock speed', section: 'compute', scope: 'cluster', baseCost: 2, growth: 1.25, maxLevel: () => 40, tradeoff: 'faster, runs hotter' },
   { id: 'cluster', name: 'Core cluster', section: 'compute', scope: 'node', baseCost: 120, growth: 9, maxLevel: (n) => (n ? n.maxClusters - 1 : 0), tradeoff: 'a new block of cores; shares heat and power' },
-  { id: 'memory', name: 'Memory', section: 'compute', scope: 'node', baseCost: 4, growth: 1.2, maxLevel: () => 60, tradeoff: 'feeds tokens to the cores' },
+  { id: 'memory', name: 'Memory', section: 'compute', scope: 'node', baseCost: 4, growth: 1.6, maxLevel: () => 60, tradeoff: 'feeds tokens to the cores' },
   { id: 'l3', name: 'L3 cache', section: 'compute', scope: 'node', baseCost: 30, growth: 1.45, maxLevel: () => 30, minNode: 'n7', tradeoff: 'boosts memory, draws power' },
   { id: 'npu', name: 'NPU', section: 'compute', scope: 'node', baseCost: 80, growth: 1.42, maxLevel: () => 40, minNode: 'n5', tradeoff: 'AI accelerator, adds heat' },
-  { id: 'heatsink', name: 'Heatsink', section: 'thermal', scope: 'node', baseCost: 3, growth: 1.2, maxLevel: () => 60, tradeoff: 'removes more heat' },
+  { id: 'heatsink', name: 'Heatsink', section: 'thermal', scope: 'node', baseCost: 3, growth: 1.6, maxLevel: () => 60, tradeoff: 'removes more heat' },
   { id: 'fan', name: 'Fan speed', section: 'thermal', scope: 'node', baseCost: 6, growth: 1.38, maxLevel: () => 30, tradeoff: 'more airflow, small power draw' },
-  { id: 'psu', name: 'PSU', section: 'power', scope: 'node', baseCost: 3, growth: 1.2, maxLevel: () => 60, tradeoff: 'more watts available' },
+  { id: 'psu', name: 'PSU', section: 'power', scope: 'node', baseCost: 3, growth: 1.6, maxLevel: () => 60, tradeoff: 'more watts available' },
   { id: 'vrm', name: 'Voltage regulator', section: 'power', scope: 'node', baseCost: 12, growth: 1.4, maxLevel: () => 30, tradeoff: 'less power per token' },
   { id: 'gating', name: 'Power gating', section: 'power', scope: 'node', baseCost: 200, growth: 1.45, maxLevel: () => 25, minNode: 'n3', tradeoff: 'idle parts sleep, less draw' },
-  { id: 'intake', name: 'Request intake', section: 'network', scope: 'rig', baseCost: 2, growth: 1.2, maxLevel: () => 100, tradeoff: 'more requests in per second' },
-  { id: 'uplink', name: 'Uplink bandwidth', section: 'network', scope: 'rig', baseCost: 4, growth: 1.2, maxLevel: () => 100, tradeoff: 'more tokens out per second' },
+  { id: 'intake', name: 'Request intake', section: 'network', scope: 'rig', baseCost: 2, growth: 1.6, maxLevel: () => 100, tradeoff: 'more requests in per second' },
+  { id: 'uplink', name: 'Uplink bandwidth', section: 'network', scope: 'rig', baseCost: 4, growth: 1.6, maxLevel: () => 100, tradeoff: 'more tokens out per second' },
 ];
 
 export const itemDef = (id: ItemId): ItemDef => ITEMS.find((i) => i.id === id)!;
@@ -121,17 +121,22 @@ export interface ResearchDef {
   name: string;
   maxLevel: number;
   cost: (level: number) => number; // Lab Points
+  time: (level: number) => number; // seconds of play to finish this level
   requires?: ResearchId;
   text: string;
 }
 export const RESEARCH: ResearchDef[] = [
-  { id: 'billing', name: 'Token pricing', maxLevel: 10, cost: (l) => 1 + l, text: '+15% £ per token per level' },
-  { id: 'reach', name: 'Reach', maxLevel: 10, cost: (l) => 1 + l, text: '+25% user demand per level' },
-  { id: 'efficiency', name: 'Efficiency', maxLevel: 8, cost: (l) => 1 + l, text: '−6% heat and power per level' },
-  { id: 'node7', name: '7nm process', maxLevel: 1, cost: () => 2, text: 'Lets you fab a 7nm chip' },
-  { id: 'node5', name: '5nm process', maxLevel: 1, cost: () => 4, requires: 'node7', text: 'Lets you fab a 5nm chip with an NPU' },
-  { id: 'node3', name: '3nm process', maxLevel: 1, cost: () => 6, requires: 'node5', text: 'Lets you fab a 3nm chip with power gating' },
+  { id: 'billing', name: 'Token pricing', maxLevel: 10, cost: (l) => 1 + l, time: (l) => 40 + 30 * l, text: '+15% £ per token per level' },
+  { id: 'reach', name: 'Reach', maxLevel: 10, cost: (l) => 1 + l, time: (l) => 40 + 30 * l, text: '+25% user demand per level' },
+  { id: 'efficiency', name: 'Efficiency', maxLevel: 8, cost: (l) => 1 + l, time: (l) => 50 + 35 * l, text: '−6% heat and power per level' },
+  { id: 'node7', name: '7nm process', maxLevel: 1, cost: () => 2, time: () => 90, text: 'Lets you fab a 7nm chip' },
+  { id: 'node5', name: '5nm process', maxLevel: 1, cost: () => 4, time: () => 150, requires: 'node7', text: 'Lets you fab a 5nm chip with an NPU' },
+  { id: 'node3', name: '3nm process', maxLevel: 1, cost: () => 6, time: () => 210, requires: 'node5', text: 'Lets you fab a 3nm chip with power gating' },
 ];
+// Lab bench slots: research runs in parallel, one job per slot.
+export const LAB_START_SLOTS = 2;
+export const LAB_SLOT_COSTS = [2500, 40000]; // £ for slot 3, then slot 4
+
 export const researchDef = (id: ResearchId): ResearchDef => RESEARCH.find((r) => r.id === id)!;
 
 // ---------- Clients and goals ----------
@@ -219,7 +224,7 @@ export const STAGE_1_CLIENTS: ClientDef[] = [
     pushes: 'Network',
     quirk: { bursts: { every: 60, length: 15, mult: 2, base: 0.8 } },
     goals: [
-      { spec: { kind: 'itemUpgrades', item: 'intake', n: 5 }, cash: 80, lab: 1 },
+      { spec: { kind: 'itemUpgrades', item: 'intake', n: 3 }, cash: 80, lab: 1 },
       { spec: { kind: 'burstsCalm', n: 2, maxQueue: 150 }, cash: 150, lab: 1 },
       { spec: { kind: 'served', n: 3000 }, cash: 250, lab: 1 },
     ],
@@ -247,7 +252,7 @@ export const STAGE_1_CLIENTS: ClientDef[] = [
     pushes: 'Memory and Power',
     quirk: { memMult: 2.5, powerMult: 1.3 },
     goals: [
-      { spec: { kind: 'itemUpgrades', item: 'memory', n: 10 }, cash: 5000, lab: 1 },
+      { spec: { kind: 'itemUpgrades', item: 'memory', n: 4 }, cash: 5000, lab: 1 },
       { spec: { kind: 'ownNode', node: 'n5' }, cash: 20000, lab: 2 },
       { spec: { kind: 'powerHigh', ratio: 0.9, secs: 30 }, cash: 50000, lab: 1 },
       { spec: { kind: 'ownNode', node: 'n3' }, cash: 200000, lab: 2 },
@@ -275,12 +280,15 @@ export const TUNING = {
   billingPerLevel: 0.15,
   efficiencyPerLevel: 0.06,
   intakeBase: 1.6, // requests/s at level 0
-  intakeGrowth: 1.16,
+  intakeGrowth: 1.5,
   uplinkBase: 12, // tokens/s at level 0
-  uplinkGrowth: 1.17,
+  uplinkGrowth: 1.5,
   throttleTemp: 85,
   idleTemp: 30,
   queueCapSeconds: 30, // queue holds at most this many seconds of demand
   sideObjectiveRotate: 600, // seconds of play
   boostSeconds: 60,
+  demandRampSeconds: 40, // demand eases up to the next goal's level over this long
+  capacityStep: 1.5, // heatsink, PSU and memory: each level is a big step, so a fix lasts
+  slack: 0.88, // a limit must bite by more than 8% before it flashes red
 };
