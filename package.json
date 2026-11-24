@@ -1,0 +1,22 @@
+{
+  "name": "silicon-bloom",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "A calm neon idle tycoon: grow one CPU core into an AI data hall.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "balance": "vite-node scripts/balance.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "typescript": "5.8.3",
+    "vite": "6.3.5",
+    "vite-node": "3.2.4",
+    "vitest": "3.2.4"
+  }
+}
