@@ -9,7 +9,13 @@ import { newNode, type GameState, type NodeState, type SideObjective } from './s
 // ---------------------------------------------------------------------------
 // Derived stats
 
-export interface ClusterStats { cores: number; clock: number; effClock: number }
+export interface ClusterStats {
+  cores: number; clock: number; effClock: number;
+  computeTok: number; // tokens/s this cluster's cores can make
+  memCap: number; // tokens/s this cluster's memory can feed
+  cap: number; // min of the two
+  memLoad: number; // 0..1, share of this cluster's memory in use last tick
+}
 export interface NodeStats {
   id: NodeId;
   def: NodeDef;
@@ -80,11 +86,11 @@ function nodeStats(s: GameState, ns: NodeState, util: number): NodeStats {
   const model = modelDef(s.model);
   const eff = 1 - TUNING.efficiencyPerLevel * research(s, 'efficiency');
 
-  // Each cluster has its own cores and clock; heat, power and memory are shared by the chip.
+  // Each cluster has its own cores, clock and memory; heat and power are shared by the chip.
   const raw = ns.clusters.map((c) => {
     let clock = def.baseClock + def.clockStep * (c.clock ?? 0);
     if (hasTalent(s, 'pip')) clock *= 1.1;
-    return { cores: 1 + (c.cores ?? 0), clock };
+    return { cores: 1 + (c.cores ?? 0), clock, memory: c.memory ?? 0 };
   });
   const cores = raw.reduce((a, c) => a + c.cores, 0);
   const npu = lv('npu');
@@ -92,10 +98,7 @@ function nodeStats(s: GameState, ns: NodeState, util: number): NodeStats {
   const heat = raw.reduce((a, c) => a + c.cores * Math.pow(c.clock, 1.5), 0) * def.heatPerCoreGHz * eff * (1 + 0.04 * npu);
   const cool = def.coolBase * Math.pow(TUNING.capacityStep, lv('heatsink')) * Math.pow(1.05, lv('fan'));
   const thermalFactor = heat > cool ? Math.pow(cool / heat, 2 / 3) : 1;
-  const clusters: ClusterStats[] = raw.map((c) => ({ ...c, effClock: c.clock * thermalFactor }));
-  const coreGHz = clusters.reduce((a, c) => a + c.cores * c.effClock, 0);
-  const sel = clusters[Math.min(ns.cluster, clusters.length - 1)];
-  const clock = sel.clock, effClock = sel.effClock;
+  const coreGHz = raw.reduce((a, c) => a + c.cores * c.clock * thermalFactor, 0);
 
   const powerMult = eff * (1 - 0.015 * lv('vrm')) * (1 - 0.02 * lv('gating')) *
     (client?.quirk.powerMult ?? 1) * (hasTalent(s, 'sal') ? 0.9 : 1);
@@ -104,9 +107,20 @@ function nodeStats(s: GameState, ns: NodeState, util: number): NodeStats {
   const supply = def.psuBase * Math.pow(TUNING.capacityStep, lv('psu'));
   const powerFactor = power > supply ? Math.max(0.05, (supply - def.idlePower) / dynamic) : 1;
 
-  const computeTok = coreGHz * Math.min(1, powerFactor) * def.tokPerCoreGHz * (1 + 0.12 * npu) / model.computeCost;
-  const memCap = def.memBase * Math.pow(TUNING.capacityStep, lv('memory')) * Math.pow(1.06, lv('l3')) / (model.memCost * (client?.quirk.memMult ?? 1));
-  const cap = Math.min(computeTok, memCap);
+  const tokPerGHz = Math.min(1, powerFactor) * def.tokPerCoreGHz * (1 + 0.12 * npu) / model.computeCost;
+  const memPerLevel = Math.pow(1.06, lv('l3')) / (model.memCost * (client?.quirk.memMult ?? 1));
+  const clusters: ClusterStats[] = raw.map((c) => {
+    const effClock = c.clock * thermalFactor;
+    const computeTok = c.cores * effClock * tokPerGHz;
+    const memCap = def.memBase * Math.pow(TUNING.capacityStep, c.memory) * memPerLevel;
+    const cap = Math.min(computeTok, memCap);
+    return { cores: c.cores, clock: c.clock, effClock, computeTok, memCap, cap, memLoad: memCap > 0 ? Math.min(1, (util * cap) / memCap) : 0 };
+  });
+  const sel = clusters[Math.min(ns.cluster, clusters.length - 1)];
+  const clock = sel.clock, effClock = sel.effClock;
+  const computeTok = clusters.reduce((a, c) => a + c.computeTok, 0);
+  const memCap = clusters.reduce((a, c) => a + c.memCap, 0);
+  const cap = clusters.reduce((a, c) => a + c.cap, 0);
 
   const heatRatio = Math.min(1, heat / cool);
   const temp = thermalFactor < 0.999 && util > 0.6
@@ -179,6 +193,7 @@ export interface Bottleneck {
   section: SectionId | 'lab';
   item?: ItemId;
   node?: NodeId;
+  cluster?: number; // for per-cluster problems such as memory
   tip: string;
 }
 
@@ -227,11 +242,18 @@ function nodeLimit(s: GameState, n: NodeStats): Bottleneck | null {
     return { system: 'power', severity: 'red', section: 'power', item: 'psu', node: n.id,
       tip: `${tag} chip needs ${fmtNum(n.power)} W but the PSU gives ${fmtNum(n.supply)} W. Cores are capped. Upgrade the PSU.` };
   }
-  if (n.memCap < n.computeTok * TUNING.slack && !maxed(['memory', 'l3'])) {
-    return { system: 'memory', severity: 'red', section: 'compute', item: 'memory', node: n.id,
-      tip: `${tag} memory can only feed ${fmtNum(n.memCap)} tok/s; the cores could do ${fmtNum(n.computeTok)}. Upgrade Memory.` };
-  }
   const ns = s.nodes.find((x) => x.id === n.id)!;
+  // Memory is per cluster: flag the selected cluster first, else the first one that is starved.
+  const starved = (c: number) => {
+    const cs = n.clusters[c];
+    return cs.memCap < cs.computeTok * TUNING.slack && level(s, 'memory', n.id, c) < maxLevelOf('memory', n.id);
+  };
+  const memIdx = starved(ns.cluster) ? ns.cluster : n.clusters.findIndex((_, c) => starved(c));
+  if (memIdx >= 0) {
+    const cs = n.clusters[memIdx];
+    return { system: 'memory', severity: 'red', section: 'compute', item: 'memory', node: n.id, cluster: memIdx,
+      tip: `${tag} C${memIdx + 1} memory can only feed ${fmtNum(cs.memCap)} tok/s; its cores could do ${fmtNum(cs.computeTok)}. Upgrade that cluster's Memory.` };
+  }
   const fixes: ItemId[] = ['cores', 'clock', 'cluster', 'npu'];
   const open = (i: ItemId, c?: number) => itemsFor(n.def, 'compute').some((x) => x.id === i) && level(s, i, n.id, c) < maxLevelOf(i, n.id);
   const anyOpen = fixes.some((i) => (itemDef(i).scope === 'cluster' ? ns.clusters.some((_, c) => open(i, c)) : open(i)));

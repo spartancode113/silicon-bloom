@@ -25,6 +25,11 @@ export function deserialise(text: string | null): GameState | null {
         delete n.levels.cores;
         delete n.levels.clock;
       }
+      // Saves from before per-cluster memory: every cluster gets the chip's old memory level.
+      if (n.levels.memory !== undefined) {
+        for (const c of n.clusters) c.memory = n.levels.memory;
+        delete n.levels.memory;
+      }
     }
     return s;
   } catch {

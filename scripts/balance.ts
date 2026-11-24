@@ -142,7 +142,7 @@ function decide(s: GameState) {
 function fixRed(s: GameState, b: Bottleneck): boolean {
   const item = b.item!;
   const alts: ItemId[] = item === 'heatsink' ? ['heatsink', 'fan'] : b.system === 'compute' ? ['cores', 'clock', 'cluster', 'npu'] : [item];
-  const opts = candidates(s).filter((c) => alts.includes(c.item) && (c.node === b.node || !c.node));
+  const opts = candidates(s).filter((c) => alts.includes(c.item) && (c.node === b.node || !c.node) && (b.cluster === undefined || c.cluster === undefined || c.cluster === b.cluster));
   opts.sort((x, y) => costC(s, x) - costC(s, y));
   return !!opts[0] && buyC(s, opts[0]);
 }

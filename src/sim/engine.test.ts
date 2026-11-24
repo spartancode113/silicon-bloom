@@ -85,8 +85,8 @@ describe('bottlenecks', () => {
 
   it('shows amber spare capacity when demand is the limit', () => {
     s.rigLevels.scheduler = 1;
-    s.nodes[0].clusters = [{ cores: 5 }];
-    s.nodes[0].levels = { memory: 30, heatsink: 30, psu: 30 };
+    s.nodes[0].clusters = [{ cores: 5, memory: 30 }];
+    s.nodes[0].levels = { heatsink: 30, psu: 30 };
     s.rigLevels.uplink = 30;
     s.queue = 0;
     const b = bottlenecks(s, rigStats(s));
@@ -178,13 +178,35 @@ describe('pacing', () => {
   });
 });
 
+describe('per-cluster memory', () => {
+  it('each cluster has its own memory, and a starved cluster is flagged by itself', () => {
+    s.rigLevels.scheduler = 1;
+    s.cash = 1e12;
+    buy(s, 'cluster', 'n14', 1); // adds C2 and selects it
+    s.nodes[0].clusters[0] = { cores: 5, clock: 10, memory: 0 };
+    s.nodes[0].clusters[1] = { memory: 12 };
+    s.nodes[0].levels = { heatsink: 30, psu: 30 };
+    s.queue = 1000; s.goalsCompleted = 0;
+    const r = rigStats(s);
+    const [c1, c2] = r.nodes[0].clusters;
+    expect(c2.memCap).toBeGreaterThan(c1.memCap);
+    const mem = bottlenecks(s, r).find((b) => b.system === 'memory');
+    expect(mem?.cluster).toBe(0);
+    // Upgrading memory on C2 leaves C1 untouched.
+    expect(level(s, 'memory', 'n14', 0)).toBe(0);
+    buy(s, 'memory', 'n14', 1, [], 1);
+    expect(level(s, 'memory', 'n14', 1)).toBe(13);
+    expect(level(s, 'memory', 'n14', 0)).toBe(0);
+  });
+});
+
 describe('saving', () => {
   it('moves cores and clock from old saves into the first cluster', () => {
     const old = JSON.parse(serialise(s));
     old.nodes = [{ id: 'n14', levels: { cores: 4, clock: 9, memory: 3 } }];
     const back = deserialise(JSON.stringify(old))!;
-    expect(back.nodes[0].clusters[0]).toEqual({ cores: 4, clock: 9 });
-    expect(back.nodes[0].levels).toEqual({ memory: 3 });
+    expect(back.nodes[0].clusters[0]).toEqual({ cores: 4, clock: 9, memory: 3 });
+    expect(back.nodes[0].levels).toEqual({});
   });
 
   it('round-trips the game state', () => {

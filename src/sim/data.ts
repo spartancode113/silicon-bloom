@@ -22,7 +22,7 @@ export interface NodeDef {
   heatPerCoreGHz: number; // W per core at 1 GHz (scales with clock^1.5)
   powerPerCoreGHz: number; // W per core per GHz
   idlePower: number; // W
-  memBase: number; // tokens/s the memory can feed at level 0
+  memBase: number; // tokens/s one cluster's memory can feed at level 0
   coolBase: number; // W removed at level 0
   psuBase: number; // W supplied at level 0
   costMult: number; // multiplies every upgrade price on this node
@@ -62,7 +62,7 @@ export const ITEMS: ItemDef[] = [
   { id: 'cores', name: 'Cores', section: 'compute', scope: 'cluster', baseCost: 3, growth: 1.9, maxLevel: (n) => (n ? n.coresPerCluster - 1 : 0), tradeoff: 'more cores, more heat and power' },
   { id: 'clock', name: 'Clock speed', section: 'compute', scope: 'cluster', baseCost: 2, growth: 1.25, maxLevel: () => 40, tradeoff: 'faster, runs hotter' },
   { id: 'cluster', name: 'Core cluster', section: 'compute', scope: 'node', baseCost: 120, growth: 9, maxLevel: (n) => (n ? n.maxClusters - 1 : 0), tradeoff: 'new core block; shares heat and power' },
-  { id: 'memory', name: 'Memory', section: 'compute', scope: 'node', baseCost: 4, growth: 1.6, maxLevel: () => 60, tradeoff: 'feeds tokens to the cores' },
+  { id: 'memory', name: 'Memory', section: 'compute', scope: 'cluster', baseCost: 4, growth: 1.6, maxLevel: () => 60, tradeoff: "feeds this cluster's cores" },
   { id: 'l3', name: 'L3 cache', section: 'compute', scope: 'node', baseCost: 30, growth: 1.45, maxLevel: () => 30, minNode: 'n7', tradeoff: 'boosts memory, draws power' },
   { id: 'npu', name: 'NPU', section: 'compute', scope: 'node', baseCost: 80, growth: 1.42, maxLevel: () => 40, minNode: 'n5', tradeoff: 'AI accelerator, adds heat' },
   { id: 'heatsink', name: 'Heatsink', section: 'thermal', scope: 'node', baseCost: 3, growth: 1.6, maxLevel: () => 60, tradeoff: 'removes more heat' },

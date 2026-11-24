@@ -170,13 +170,15 @@ export function clusterSwitcher(s: GameState, ui: UiState, bn: Bottleneck[]): st
   if (ui.section !== 'compute') return '';
   const ns = s.nodes.find((n) => n.id === s.selectedNode)!;
   const def = nodeDef(ns.id);
-  const red = bn.some((b) => b.node === ns.id && b.system === 'compute');
+  const red = bn.some((b) => b.node === ns.id && (b.system === 'compute' || b.system === 'memory'));
   const btns = Array.from({ length: def.maxClusters }, (_, i) => {
     if (i < ns.clusters.length) {
       const c = ns.clusters[i];
-      return `<button class="cl ${ns.cluster === i ? 'active' : ''}" data-action="cluster" data-cluster="${i}">C${i + 1}<small>${1 + (c.cores ?? 0)} cores</small></button>`;
+      const cores = 1 + (c.cores ?? 0);
+      const memRed = bn.some((b) => b.node === ns.id && b.system === 'memory' && b.cluster === i);
+      return `<button class="cl ${ns.cluster === i ? 'active' : ''} ${memRed ? 'red' : ''}" data-action="cluster" data-cluster="${i}">C${i + 1}<small>${cores} core${cores === 1 ? '' : 's'}</small></button>`;
     }
-    return `<button class="cl locked" data-action="noop" disabled>C${i + 1}<small>${i === ns.clusters.length ? 'buy below' : 'locked'}</small></button>`;
+    return `<button class="cl locked" data-action="noop" disabled>C${i + 1}<small>${i === ns.clusters.length ? 'buy next' : 'locked'}</small></button>`;
   }).join('');
   return `<div class="clusters"><span class="eyebrow">${def.label} clusters${red ? ' <i class="dot red"></i>' : ''}</span>${btns}</div>`;
 }
@@ -191,16 +193,17 @@ function itemValue(s: GameState, item: ItemId, node: NodeId, lvl: number): strin
   const d = nodeDef(node);
   const ns = s.nodes.find((n) => n.id === node);
   const lv = (i: ItemId) => (i === item ? lvl : ns?.levels[i] ?? 0);
+  const step = TUNING.capacityStep;
   switch (item) {
     case 'scheduler': return lvl ? 'auto' : 'manual';
     case 'cluster': return `${1 + lvl}`;
     case 'cores': return `${1 + lvl}`;
     case 'clock': return `${(d.baseClock + d.clockStep * lvl).toFixed(2)}`;
-    case 'memory': return fmtNum(d.memBase * Math.pow(1.15, lvl) * Math.pow(1.06, lv('l3')));
+    case 'memory': return fmtNum(d.memBase * Math.pow(step, lvl) * Math.pow(1.06, lv('l3')));
     case 'l3': return `×${Math.pow(1.06, lvl).toFixed(2)}`;
     case 'npu': return `+${lvl * 12}%`;
-    case 'heatsink': case 'fan': return fmtNum(d.coolBase * Math.pow(1.15, lv('heatsink')) * Math.pow(1.05, lv('fan')));
-    case 'psu': return fmtNum(d.psuBase * Math.pow(1.15, lvl));
+    case 'heatsink': case 'fan': return fmtNum(d.coolBase * Math.pow(step, lv('heatsink')) * Math.pow(1.05, lv('fan')));
+    case 'psu': return fmtNum(d.psuBase * Math.pow(step, lvl));
     case 'vrm': return `−${(lvl * 1.5).toFixed(1)}%`;
     case 'gating': return `−${lvl * 2}%`;
     case 'intake': return fmtNum(TUNING.intakeBase * Math.pow(TUNING.intakeGrowth, lvl));
@@ -220,6 +223,7 @@ export function upgradeCards(s: GameState, ui: UiState, bn: Bottleneck[]): strin
   const flagged = (id: ItemId, scope: 'cluster' | 'node' | 'rig') => bn.some((b) => {
     if (b.severity !== 'red' || !b.item) return false;
     if (scope !== 'rig' && b.node !== s.selectedNode) return false;
+    if (scope === 'cluster' && b.cluster !== undefined && b.cluster !== ns.cluster) return false;
     if (b.item === id) return true;
     if (b.item === 'heatsink' && id === 'fan') return true;
     if (b.system === 'compute' && (id === 'cores' || id === 'clock' || id === 'cluster' || id === 'npu')) return true;

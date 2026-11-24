@@ -1,6 +1,6 @@
 // Canvas renderer for the rig: chips, power, cooling, users, billing and the
 // stream of request packets. Pure drawing; it reads state and never mutates it.
-import { nodeDef, type NodeId } from '../sim/data';
+import { TUNING, nodeDef, type NodeId } from '../sim/data';
 import { fmtMoney, fmtNum, type Bottleneck, type NodeStats, type RigStats, type SystemId } from '../sim/engine';
 import type { GameState } from '../sim/state';
 
@@ -24,7 +24,7 @@ const CHIP = 240;
 const GAP = 70;
 
 interface Rect { x: number; y: number; w: number; h: number }
-interface Particle { pts: [number, number][]; t: number; speed: number; color: string; size: number }
+interface Particle { pts: [number, number][]; t: number; speed: number; color: string; size: number; pill?: boolean }
 
 export type ZoneSection = 'compute' | 'thermal' | 'power' | 'network';
 export interface Zone { rect: Rect; section: ZoneSection; node?: NodeId; cluster?: number }
@@ -41,6 +41,7 @@ export class RigRenderer {
   private time = 0;
   private fanAngle = new Map<NodeId, number>();
   private clickFlash = 0;
+  private lastQueue = 0;
   view: RigView = { chipRects: new Map(), zones: [] };
   hover: Zone | null = null;
 
@@ -92,7 +93,8 @@ export class RigRenderer {
     this.view.chipRects = rects;
     const barW = Math.max(560, chipsW + 80);
     const billing: Rect = { x: -barW / 2, y: chipY - 150, w: barW, h: 46 };
-    const users: Rect = { x: -barW / 2, y: chipY + CHIP + 110, w: barW, h: 50 };
+    const users: Rect = { x: -barW / 2, y: chipY + CHIP + 100, w: barW, h: 92 };
+    const gate: Rect = { x: -70, y: users.y + 6, w: 140, h: users.h - 12 };
     const leftX = Math.min(x0 - 210, -barW / 2 - 160);
     const psu: Rect = { x: leftX, y: chipY + 20, w: 140, h: CHIP - 20 };
     const clockBox: Rect = { x: leftX, y: chipY - 110, w: 140, h: 100 };
@@ -120,16 +122,17 @@ export class RigRenderer {
 
     const red = new Set<SystemId>(bn.filter((b) => b.severity === 'red').map((b) => b.system));
     const redNodes = new Map<NodeId, SystemId>();
-    for (const b of bn) if (b.node && b.severity === 'red') redNodes.set(b.node, b.system);
+    const redCluster = new Map<NodeId, number>();
+    for (const b of bn) if (b.node && b.severity === 'red') { redNodes.set(b.node, b.system); if (b.cluster !== undefined) redCluster.set(b.node, b.cluster); }
     const amberDemand = bn.some((b) => b.system === 'demand');
     const pulse = 0.5 + 0.5 * Math.sin(this.time * 6);
 
     // ----- wires (drawn under everything)
-    const busY = users.y - 50;
+    const busY = users.y - 44;
     ctx.lineWidth = 2;
     for (const [id, rc] of rects) {
       const col = NODE_COLOR[id];
-      this.wire([[rc.x + rc.w / 2, users.y], [rc.x + rc.w / 2, rc.y + rc.h]], 'rgba(90,168,255,0.35)');
+      this.wire([[0, gate.y], [0, busY], [rc.x + rc.w / 2, busY], [rc.x + rc.w / 2, rc.y + rc.h]], 'rgba(90,168,255,0.35)');
       this.wire([[rc.x + rc.w / 2, rc.y], [rc.x + rc.w / 2, billing.y + billing.h]], 'rgba(62,224,143,0.35)');
       this.wire([[psu.x + psu.w, rc.y + rc.h - 30], [rc.x, rc.y + rc.h - 30]], 'rgba(245,182,66,0.25)');
       this.wire([[rc.x + rc.w, rc.y + 40], [rad.x, rc.y + 40]], 'rgba(255,120,80,0.25)');
@@ -202,19 +205,20 @@ export class RigRenderer {
     const maxTemp = Math.max(...r.nodes.map((x) => x.temp));
     this.label(`${Math.round(maxTemp)}°`, rad.x + rad.w / 2, rad.y + rad.h - 14, hot ? this.redCol(pulse) : C.cyan, 18, 'center');
 
-    // ----- users
+    // ----- users: people queue in two lanes and walk into the intake gate in the middle
     const inRed = red.has('intake');
     this.panel(users, inRed ? this.redCol(pulse) : amberDemand ? C.amber : C.blue, 0.9);
-    this.label('USERS', users.x + 18, users.y + 32, C.blue, 16, 'left', true);
-    this.label(`${fmtNum(r.demand)} req/s`, users.x + users.w - 18, users.y + 32, amberDemand ? C.amber : C.text, 18, 'right');
-    this.label(`QUEUE ${fmtNum(s.queue)}`, users.x + users.w / 2, users.y + 22, s.queue > 20 ? C.amber : C.muted, 12, 'center');
-    this.label(`INTAKE ${fmtNum(r.intakeCap)} req/s`, users.x + users.w / 2, users.y + 40, inRed ? this.redCol(pulse) : C.muted, 11, 'center');
+    this.label('USERS', users.x + 18, users.y + 24, C.blue, 15, 'left', true);
+    this.label(`${fmtNum(r.demand)} req/s`, users.x + users.w - 18, users.y + 24, amberDemand ? C.amber : C.text, 15, 'right');
+    this.lastQueue = s.queue;
+    this.queueLanes(s, r, users, gate);
+    this.gate(r, gate, inRed, pulse);
 
     // ----- chips
-    for (const st of r.nodes) this.chip(s, st, rects.get(st.id)!, redNodes.get(st.id), pulse, !r.scheduler);
+    for (const st of r.nodes) this.chip(s, st, rects.get(st.id)!, redNodes.get(st.id), pulse, !r.scheduler, redCluster.get(st.id));
 
     // ----- packets
-    this.spawn(r, rects, users, billing, dt);
+    this.spawn(r, rects, gate, busY, billing, dt);
     this.stepParticles(dt);
 
     // ----- hover outline on clickable parts
@@ -340,7 +344,7 @@ export class RigRenderer {
     ctx.restore();
   }
 
-  private chip(s: GameState, st: NodeStats, rc: Rect, redSys: SystemId | undefined, pulse: number, manual: boolean) {
+  private chip(s: GameState, st: NodeStats, rc: Rect, redSys: SystemId | undefined, pulse: number, manual: boolean, memRedCluster?: number) {
     const ctx = this.ctx;
     const col = NODE_COLOR[st.id];
     const selected = s.selectedNode === st.id;
@@ -457,24 +461,35 @@ export class RigRenderer {
       }
     }
 
-    // memory strip
-    const memRed = redSys === 'memory';
-    const my = gy + gh + 10;
-    const hasNpu = def.id === 'n5' || def.id === 'n3';
-    const mw = hasNpu ? gw * 0.68 : gw;
-    const segs = 14;
-    const used = st.memCap > 0 ? Math.min(1, (st.util * st.cap) / st.memCap) : 0;
-    for (let i = 0; i < segs; i++) {
-      const on = i / segs < Math.max(0.08, used);
+    // memory: one block under each cluster, showing how full that cluster's memory is
+    const my = gy + gh + 8;
+    for (let k = 0; k < def.maxClusters; k++) {
+      const mb: Rect = { x: gx + k * slotW + 2, y: my, w: slotW - 4, h: 20 };
+      const cl = st.clusters[k];
+      if (!cl) {
+        ctx.save();
+        ctx.setLineDash([3, 3]);
+        ctx.strokeStyle = 'rgba(109,135,145,0.3)';
+        this.round(mb, 4); ctx.stroke();
+        ctx.restore();
+        continue;
+      }
+      // Every starved cluster shows red; the one the tip points at pulses.
+      const starved = cl.memCap < cl.computeTok * TUNING.slack && st.util > 0.5;
+      const memRed = starved || (redSys === 'memory' && memRedCluster === k);
       const c = memRed ? this.redCol(pulse) : C.amber;
-      this.box({ x: gx + i * (mw / segs) + 1, y: my, w: mw / segs - 3, h: 22 }, on ? c : C.line, on ? 0.95 : 0.6, on ? 'rgba(245,182,66,0.25)' : undefined);
+      const segs = 4, sw = (mb.w - 4) / segs;
+      const used = Math.max(0.06, cl.memLoad);
+      for (let i = 0; i < segs; i++) {
+        const on = i / segs < used;
+        this.box({ x: mb.x + 2 + i * sw, y: mb.y, w: sw - 3, h: mb.h }, on ? c : C.line, on ? 0.95 : 0.6, on ? 'rgba(245,182,66,0.22)' : undefined);
+      }
+      this.label(`M${k + 1}`, mb.x + 2, my + 32, memRed ? c : C.muted, 9, 'left', true);
+      this.label(`${Math.round(cl.memLoad * 100)}%`, mb.x + mb.w - 2, my + 32, memRed ? c : C.muted, 9, 'right');
+      this.view.zones.unshift({ rect: mb, section: 'compute', node: st.id, cluster: k });
     }
-    this.label('MEM', gx, my + 38, memRed ? this.redCol(pulse) : C.muted, 10, 'left', true);
-    this.label(`${fmtNum(st.memCap)} tok/s`, gx + mw, my + 38, C.muted, 10, 'right');
-    if (hasNpu) {
-      const nr: Rect = { x: gx + mw + 8, y: my, w: gw - mw - 8, h: 22 };
-      this.box(nr, C.magenta, st.npu > 0 ? 0.95 : 0.4, st.npu > 0 ? 'rgba(196,108,255,0.2)' : undefined);
-      this.label(`NPU ${st.npu}`, nr.x + nr.w / 2, my + 38, C.magenta, 10, 'center', true);
+    if (def.id === 'n5' || def.id === 'n3') {
+      this.label(`NPU ${st.npu}`, rc.x + rc.w / 2, rc.y + 24, st.npu > 0 ? C.magenta : C.muted, 10, 'center', true);
     }
 
     // footer: temp bar + throughput
@@ -508,7 +523,7 @@ export class RigRenderer {
     ctx.restore();
   }
 
-  private spawn(r: RigStats, rects: Map<NodeId, Rect>, users: Rect, billing: Rect, dt: number) {
+  private spawn(r: RigStats, rects: Map<NodeId, Rect>, gate: Rect, busY: number, billing: Rect, dt: number) {
     // Visual rates grow with the log of real throughput so it always looks busier as you improve.
     const vis = (x: number) => (x <= 0 ? 0 : Math.min(45, 1.5 + Math.log2(1 + x) * 3.2));
     const speed = (x: number) => 0.35 + Math.min(1.4, Math.log10(1 + x) * 0.35);
@@ -527,9 +542,9 @@ export class RigRenderer {
     while (this.spawnAcc.in >= 1) {
       this.spawnAcc.in -= 1;
       const rc = rects.get(pick())!;
-      const sx = users.x + 60 + Math.random() * (users.w - 120);
       const tx = rc.x + rc.w / 2 + (Math.random() - 0.5) * 30;
-      this.particles.push({ pts: [[sx, users.y], [sx, users.y - 40], [tx, users.y - 40], [tx, rc.y + rc.h]], t: 0, speed: speed(r.arrivals), color: C.blue, size: 3 });
+      const lane = (Math.random() - 0.5) * 10;
+      this.particles.push({ pts: [[lane, gate.y], [lane, busY + lane * 0.3], [tx, busY + lane * 0.3], [tx, rc.y + rc.h]], t: 0, speed: speed(r.arrivals), color: C.blue, size: 3, pill: true });
     }
     while (this.spawnAcc.out >= 1) {
       this.spawnAcc.out -= 1;
@@ -538,6 +553,82 @@ export class RigRenderer {
       const tx = billing.x + billing.w * (0.3 + Math.random() * 0.4);
       this.particles.push({ pts: [[sx, rc.y], [sx, billing.y + billing.h + 40], [tx, billing.y + billing.h + 40], [tx, billing.y + billing.h]], t: 0, speed: speed(r.capTok), color: C.green, size: 2.6 });
     }
+  }
+
+  /** Little people waiting in two lanes either side of the intake gate. The lane fills as the queue grows. */
+  private queueLanes(s: GameState, r: RigStats, users: Rect, gate: Rect) {
+    const ctx = this.ctx;
+    const ly = users.y + 64, spacing = 17;
+    const lanes: [number, number][] = [[users.x + 18, gate.x - 14], [users.x + users.w - 18, gate.x + gate.w + 14]];
+    const perLane = Math.floor((lanes[0][1] - lanes[0][0]) / spacing);
+    const waiting = s.queue <= 0 ? 0 : s.queue < perLane * 2 ? Math.ceil(s.queue) : perLane * 2;
+    const busy = s.queue > 20;
+    // Walking speed follows how fast requests get through the gate.
+    const flow = r.scheduler ? Math.min(2.2, 0.25 + Math.log10(1 + r.arrivals) * 0.6) : 0.08;
+    const phase = (this.time * flow) % 1;
+    lanes.forEach(([outer, inner], li) => {
+      const dir = Math.sign(inner - outer);
+      // lane floor
+      ctx.save();
+      ctx.strokeStyle = 'rgba(90,168,255,0.18)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 6]);
+      ctx.beginPath(); ctx.moveTo(outer, ly + 11); ctx.lineTo(inner, ly + 11); ctx.stroke();
+      ctx.restore();
+      const n = Math.ceil(waiting / 2) - (li === 1 && waiting % 2 ? 1 : 0);
+      for (let i = 0; i < n; i++) {
+        const d = (i + 1 - phase) * spacing; // distance back from the gate end
+        const x = inner - dir * d;
+        if ((x - outer) * dir < 0) continue;
+        const fadeIn = Math.min(1, ((x - outer) * dir) / spacing);
+        const fadeOut = Math.min(1, d / (spacing * 0.9));
+        const bob = Math.abs(Math.sin(this.time * flow * Math.PI * 2 + i * 0.9)) * 2;
+        const hue = (i * 7 + li * 3) % 5 === 0 ? C.cyan : busy && i > n * 0.6 ? C.amber : C.blue;
+        this.person(x, ly - bob, hue, Math.min(fadeIn, fadeOut));
+      }
+    });
+    if (waiting === 0) this.label('no one waiting', users.x + 18, ly + 2, C.muted, 10, 'left');
+  }
+
+  private person(x: number, y: number, color: string, alpha: number) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 8;
+    ctx.beginPath(); ctx.arc(x, y - 4, 3.4, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(x, y + 5.5, 5.8, 4.2, 0, Math.PI, 0); ctx.fill();
+    ctx.restore();
+  }
+
+  /** The intake gate: people go in at the sides, request capsules leave from the top. */
+  private gate(r: RigStats, g: Rect, red: boolean, pulse: number) {
+    const ctx = this.ctx;
+    const col = red ? this.redCol(pulse) : C.blue;
+    ctx.save();
+    ctx.fillStyle = C.panel;
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 1.5;
+    ctx.shadowColor = col;
+    ctx.shadowBlur = 12;
+    this.round(g, 10); ctx.fill(); ctx.stroke();
+    ctx.restore();
+    // chevrons pointing inward and up, sweeping with the flow
+    const flow = r.scheduler ? 1 + Math.log10(1 + r.arrivals) : 0.3;
+    for (let i = 0; i < 3; i++) {
+      const a = 0.25 + 0.75 * ((Math.sin(this.time * flow * 3 - i * 1.2) + 1) / 2);
+      for (const side of [-1, 1]) {
+        const cx = g.x + g.w / 2 + side * (g.w / 2 - 14 - i * 8);
+        ctx.save();
+        ctx.strokeStyle = col; ctx.globalAlpha = a; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(cx + side * 3, g.y + 46); ctx.lineTo(cx - side * 3, g.y + 52); ctx.lineTo(cx + side * 3, g.y + 58); ctx.stroke();
+        ctx.restore();
+      }
+    }
+    this.label('INTAKE', g.x + g.w / 2, g.y + 18, col, 12, 'center', true);
+    this.label(`${fmtNum(r.intakeCap)} req/s`, g.x + g.w / 2, g.y + 36, red ? col : C.text, 11, 'center');
+    this.label(`QUEUE ${fmtNum(this.lastQueue)}`, g.x + g.w / 2, g.y + g.h - 10, this.lastQueue > 20 ? C.amber : C.muted, 10, 'center');
   }
 
   burstFromChip(id: NodeId) {
@@ -559,7 +650,19 @@ export class RigRenderer {
       ctx.shadowColor = p.color;
       ctx.shadowBlur = 10;
       ctx.beginPath();
-      ctx.arc(x, y, p.size, 0, Math.PI * 2);
+      if (p.pill) {
+        // A request capsule with a faint trail behind it.
+        const [bx, by] = along(p.pts, Math.max(0, Math.min(1, p.t) - 0.025));
+        ctx.globalAlpha = 0.35;
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = p.color;
+        ctx.moveTo(bx, by); ctx.lineTo(x, y); ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.beginPath();
+        ctx.roundRect(x - 5, y - 3, 10, 6, 3);
+      } else {
+        ctx.arc(x, y, p.size, 0, Math.PI * 2);
+      }
       ctx.fill();
     }
     ctx.restore();
