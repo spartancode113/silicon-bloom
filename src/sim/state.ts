@@ -1,9 +1,14 @@
 import type { ItemId, ModelId, NodeId, ResearchId, SectionId, TalentId } from './data';
 
+export type Levels = Partial<Record<ItemId, number>>;
 export interface NodeState {
   id: NodeId;
-  levels: Partial<Record<ItemId, number>>;
+  levels: Levels; // chip-wide upgrades (memory, cooling, power, clusters…)
+  clusters: Levels[]; // per core cluster: cores and clock
+  cluster: number; // which cluster the upgrade panel is showing
 }
+
+export const newNode = (id: NodeId): NodeState => ({ id, levels: {}, clusters: [{}], cluster: 0 });
 
 export type SideKind = 'levelSection' | 'tokensWindow' | 'queueCalm' | 'completeGoal';
 export interface SideObjective {
@@ -54,7 +59,7 @@ export function newGame(seed = Date.now() % 100000): GameState {
     playTime: 0,
     cash: 0,
     lab: 0,
-    nodes: [{ id: 'n14', levels: {} }],
+    nodes: [newNode('n14')],
     rigLevels: {},
     selectedNode: 'n14',
     research: {},

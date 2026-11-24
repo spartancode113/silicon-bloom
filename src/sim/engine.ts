@@ -4,17 +4,19 @@ import {
   type ClientDef, type GoalDef, type ItemDef, type ItemId, type ModelId, type NodeDef,
   type NodeId, type ResearchId, type SectionId, type TalentId,
 } from './data';
-import type { GameState, NodeState, SideObjective } from './state';
+import { newNode, type GameState, type NodeState, type SideObjective } from './state';
 
 // ---------------------------------------------------------------------------
 // Derived stats
 
+export interface ClusterStats { cores: number; clock: number; effClock: number }
 export interface NodeStats {
   id: NodeId;
   def: NodeDef;
-  cores: number;
-  clock: number; // set clock, GHz
-  effClock: number; // after thermal throttling
+  clusters: ClusterStats[];
+  cores: number; // across all clusters
+  clock: number; // selected cluster's set clock, GHz
+  effClock: number; // selected cluster's clock after thermal throttling
   heat: number; // W at full load
   cool: number; // W removed
   thermalFactor: number; // 1 = no throttle
@@ -44,11 +46,14 @@ export interface RigStats {
   scheduler: boolean;
 }
 
-export const level = (s: GameState, item: ItemId, node?: NodeId): number => {
+/** Level of an upgrade. Cluster upgrades read the given cluster, or the chip's selected one. */
+export const level = (s: GameState, item: ItemId, node?: NodeId, cluster?: number): number => {
   const def = itemDef(item);
   if (def.scope === 'rig') return s.rigLevels[item] ?? 0;
   const n = s.nodes.find((x) => x.id === (node ?? s.selectedNode));
-  return n?.levels[item] ?? 0;
+  if (!n) return 0;
+  if (def.scope === 'cluster') return n.clusters[cluster ?? n.cluster]?.[item] ?? 0;
+  return n.levels[item] ?? 0;
 };
 
 export const currentClient = (s: GameState): ClientDef | undefined => STAGE_1_CLIENTS[s.clientIndex];
@@ -75,24 +80,31 @@ function nodeStats(s: GameState, ns: NodeState, util: number): NodeStats {
   const model = modelDef(s.model);
   const eff = 1 - TUNING.efficiencyPerLevel * research(s, 'efficiency');
 
-  const cores = 1 + lv('cores');
-  let clock = def.baseClock + def.clockStep * lv('clock');
-  if (hasTalent(s, 'pip')) clock *= 1.1;
+  // Each cluster has its own cores and clock; heat, power and memory are shared by the chip.
+  const raw = ns.clusters.map((c) => {
+    let clock = def.baseClock + def.clockStep * (c.clock ?? 0);
+    if (hasTalent(s, 'pip')) clock *= 1.1;
+    return { cores: 1 + (c.cores ?? 0), clock };
+  });
+  const cores = raw.reduce((a, c) => a + c.cores, 0);
   const npu = lv('npu');
 
-  const heat = cores * Math.pow(clock, 1.5) * def.heatPerCoreGHz * eff * (1 + 0.04 * npu);
+  const heat = raw.reduce((a, c) => a + c.cores * Math.pow(c.clock, 1.5), 0) * def.heatPerCoreGHz * eff * (1 + 0.04 * npu);
   const cool = def.coolBase * Math.pow(1.15, lv('heatsink')) * Math.pow(1.05, lv('fan'));
   const thermalFactor = heat > cool ? Math.pow(cool / heat, 2 / 3) : 1;
-  const effClock = clock * thermalFactor;
+  const clusters: ClusterStats[] = raw.map((c) => ({ ...c, effClock: c.clock * thermalFactor }));
+  const coreGHz = clusters.reduce((a, c) => a + c.cores * c.effClock, 0);
+  const sel = clusters[Math.min(ns.cluster, clusters.length - 1)];
+  const clock = sel.clock, effClock = sel.effClock;
 
   const powerMult = eff * (1 - 0.015 * lv('vrm')) * (1 - 0.02 * lv('gating')) *
     (client?.quirk.powerMult ?? 1) * (hasTalent(s, 'sal') ? 0.9 : 1);
-  const dynamic = (cores * effClock * def.powerPerCoreGHz + lv('fan') * 0.4 * def.idlePower / 5 + lv('l3') * def.idlePower * 0.05) * powerMult;
+  const dynamic = (coreGHz * def.powerPerCoreGHz + lv('fan') * 0.4 * def.idlePower / 5 + lv('l3') * def.idlePower * 0.05) * powerMult;
   const power = dynamic + def.idlePower;
   const supply = def.psuBase * Math.pow(1.15, lv('psu'));
   const powerFactor = power > supply ? Math.max(0.05, (supply - def.idlePower) / dynamic) : 1;
 
-  const computeTok = cores * effClock * Math.min(1, powerFactor) * def.tokPerCoreGHz * (1 + 0.12 * npu) / model.computeCost;
+  const computeTok = coreGHz * Math.min(1, powerFactor) * def.tokPerCoreGHz * (1 + 0.12 * npu) / model.computeCost;
   const memCap = def.memBase * Math.pow(1.15, lv('memory')) * Math.pow(1.06, lv('l3')) / (model.memCost * (client?.quirk.memMult ?? 1));
   const cap = Math.min(computeTok, memCap);
 
@@ -103,7 +115,7 @@ function nodeStats(s: GameState, ns: NodeState, util: number): NodeStats {
   const powerDraw = def.idlePower + Math.min(dynamic * util, supply - def.idlePower);
 
   return {
-    id: ns.id, def, cores, clock, effClock, heat, cool, thermalFactor, power, supply,
+    id: ns.id, def, clusters, cores, clock, effClock, heat, cool, thermalFactor, power, supply,
     powerFactor: Math.min(1, powerFactor), computeTok, memCap, cap, util, temp, powerDraw, npu,
   };
 }
@@ -219,10 +231,15 @@ function nodeLimit(s: GameState, n: NodeStats): Bottleneck | null {
     return { system: 'memory', severity: 'red', section: 'compute', item: 'memory', node: n.id,
       tip: `${tag} memory can only feed ${fmtNum(n.memCap)} tok/s; the cores could do ${fmtNum(n.computeTok)}. Upgrade Memory.` };
   }
-  const coresMaxed = n.cores >= n.def.maxCores;
-  if (maxed(['cores', 'clock', 'npu'])) return null;
-  return { system: 'compute', severity: 'red', section: 'compute', item: coresMaxed ? 'clock' : 'cores', node: n.id,
-    tip: `${tag} cores are flat out at ${fmtNum(n.computeTok)} tok/s. Add cores or raise the clock.` };
+  const ns = s.nodes.find((x) => x.id === n.id)!;
+  const fixes: ItemId[] = ['cores', 'clock', 'cluster', 'npu'];
+  const open = (i: ItemId, c?: number) => itemsFor(n.def, 'compute').some((x) => x.id === i) && level(s, i, n.id, c) < maxLevelOf(i, n.id);
+  const anyOpen = fixes.some((i) => (itemDef(i).scope === 'cluster' ? ns.clusters.some((_, c) => open(i, c)) : open(i)));
+  if (!anyOpen) return null;
+  const sel = ns.cluster;
+  const item: ItemId = open('cores', sel) ? 'cores' : open('clock', sel) ? 'clock' : open('cluster') ? 'cluster' : 'cores';
+  return { system: 'compute', severity: 'red', section: 'compute', item, node: n.id,
+    tip: `${tag} cores are flat out at ${fmtNum(n.computeTok)} tok/s. Add cores, raise the clock or add a cluster.` };
 }
 
 // ---------------------------------------------------------------------------
@@ -233,9 +250,15 @@ export interface GameEvent {
   text: string;
 }
 
-export function costOf(s: GameState, item: ItemId, node: NodeId | undefined, lvl: number): number {
+export function costOf(s: GameState, item: ItemId, node: NodeId | undefined, lvl: number, cluster?: number): number {
   const def = itemDef(item);
-  const mult = def.scope === 'node' ? nodeDef(node ?? s.selectedNode).costMult : 1;
+  if (def.scope === 'rig') return def.baseCost * Math.pow(def.growth, lvl);
+  const id = node ?? s.selectedNode;
+  let mult = nodeDef(id).costMult;
+  if (def.scope === 'cluster') {
+    const ns = s.nodes.find((x) => x.id === id);
+    mult *= Math.pow(1.6, cluster ?? ns?.cluster ?? 0); // later clusters cost a bit more to fill
+  }
   return def.baseCost * mult * Math.pow(def.growth, lvl);
 }
 
@@ -245,20 +268,24 @@ export function maxLevelOf(item: ItemId, node?: NodeId): number {
 }
 
 /** Buy up to `count` levels. Returns levels bought. */
-export function buy(s: GameState, item: ItemId, node: NodeId | undefined, count: number, events: GameEvent[] = []): number {
+export function buy(s: GameState, item: ItemId, node: NodeId | undefined, count: number, events: GameEvent[] = [], cluster?: number): number {
   const def = itemDef(item);
-  const nodeId = def.scope === 'node' ? node ?? s.selectedNode : undefined;
+  const nodeId = def.scope !== 'rig' ? node ?? s.selectedNode : undefined;
   const ns = nodeId ? s.nodes.find((n) => n.id === nodeId) : undefined;
-  if (def.scope === 'node' && !ns) return 0;
+  if (def.scope !== 'rig' && !ns) return 0;
+  const ci = cluster ?? ns?.cluster ?? 0;
   let bought = 0;
   while (bought < count) {
-    const lvl = level(s, item, nodeId);
+    const lvl = level(s, item, nodeId, ci);
     if (lvl >= maxLevelOf(item, nodeId)) break;
-    const c = costOf(s, item, nodeId, lvl);
+    const c = costOf(s, item, nodeId, lvl, ci);
     if (s.cash + 1e-9 < c) break;
     s.cash -= c;
-    if (ns) ns.levels[item] = lvl + 1;
-    else s.rigLevels[item] = lvl + 1;
+    if (def.scope === 'cluster') ns!.clusters[ci][item] = lvl + 1;
+    else if (ns) {
+      ns.levels[item] = lvl + 1;
+      if (item === 'cluster') { ns.clusters.push({}); ns.cluster = ns.clusters.length - 1; }
+    } else s.rigLevels[item] = lvl + 1;
     bought++;
   }
   if (bought > 0) onUpgrade(s, item, def.section, bought, events);
@@ -279,7 +306,7 @@ export function canFab(s: GameState, id: NodeId): { ok: boolean; reason: string 
 export function fabNode(s: GameState, id: NodeId, events: GameEvent[] = []): boolean {
   if (!canFab(s, id).ok) return false;
   s.cash -= nodeDef(id).unlockCost;
-  s.nodes.push({ id, levels: {} });
+  s.nodes.push(newNode(id));
   s.selectedNode = id;
   events.push({ kind: 'info', text: `Fabbed a ${nodeDef(id).label} chip. It joins the rig and starts earning.` });
   return true;
@@ -422,7 +449,7 @@ export function goalValue(s: GameState, g: GoalDef): number {
     case 'ownNode': return s.nodes.some((n) => n.id === sp.node) ? 1 : 0;
     case 'tokRate': return s.servedRate;
     case 'manual': return level(s, 'scheduler') > 0 ? sp.n : s.goalProgress;
-    case 'clock': return Math.max(...s.nodes.map((n) => nodeDef(n.id).baseClock + nodeDef(n.id).clockStep * (n.levels.clock ?? 0)));
+    case 'clock': return Math.max(...s.nodes.flatMap((n) => n.clusters.map((c) => nodeDef(n.id).baseClock + nodeDef(n.id).clockStep * (c.clock ?? 0))));
     default: return s.goalProgress;
   }
 }
@@ -579,4 +606,10 @@ export function fmtTime(sec: number): string {
   const ss = Math.floor(sec % 60);
   const p = (x: number) => x.toString().padStart(2, '0');
   return h > 0 ? `${h}:${p(m)}:${p(ss)}` : `${p(m)}:${p(ss)}`;
+}
+
+/** Select which core cluster of a chip the upgrade panel shows. */
+export function selectCluster(s: GameState, node: NodeId, cluster: number) {
+  const ns = s.nodes.find((n) => n.id === node);
+  if (ns && cluster >= 0 && cluster < ns.clusters.length) ns.cluster = cluster;
 }

@@ -27,7 +27,7 @@ interface Rect { x: number; y: number; w: number; h: number }
 interface Particle { pts: [number, number][]; t: number; speed: number; color: string; size: number }
 
 export type ZoneSection = 'compute' | 'thermal' | 'power' | 'network';
-export interface Zone { rect: Rect; section: ZoneSection; node?: NodeId }
+export interface Zone { rect: Rect; section: ZoneSection; node?: NodeId; cluster?: number }
 export interface RigView {
   chipRects: Map<NodeId, Rect>;
   zones: Zone[];
@@ -381,56 +381,79 @@ export class RigRenderer {
     this.label(`${def.chipName}`, rc.x + 14, rc.y + 24, col, 13, 'left', true);
     this.label(`${def.label}`, rc.x + rc.w - 14, rc.y + 24, C.muted, 12, 'right');
 
-    // core grid
-    const cols = def.maxCores <= 8 ? 4 : def.maxCores <= 12 ? 4 : def.maxCores <= 16 ? 4 : 6;
-    const rows = Math.ceil(def.maxCores / cols);
+    // core clusters: one framed block per cluster slot, each with its own grid of cores
     const gx = rc.x + 16, gy = rc.y + 38, gw = rc.w - 32, gh = rc.h * 0.52;
-    const cw = gw / cols, chh = gh / rows;
     const computeRed = redSys === 'compute';
-    for (let i = 0; i < def.maxCores; i++) {
-      const cx = gx + (i % cols) * cw + 3, cy = gy + Math.floor(i / cols) * chh + 3;
-      const cell: Rect = { x: cx, y: cy, w: cw - 6, h: chh - 6 };
-      if (i < st.cores) {
-        const glow = 0.25 + st.util * 0.6 + flash * 0.4;
-        const c = computeRed ? this.redCol(pulse) : C.green;
-        ctx.save();
-        ctx.fillStyle = `rgba(62,224,143,${0.08 + glow * 0.25})`;
-        ctx.strokeStyle = c;
-        ctx.lineWidth = 1.5;
-        ctx.shadowColor = c;
-        ctx.shadowBlur = 6 + glow * 10;
-        this.round(cell, 4); ctx.fill(); ctx.stroke();
-        ctx.restore();
-        // inner sub-cells
-        ctx.save();
-        ctx.strokeStyle = 'rgba(62,224,143,0.35)';
-        ctx.lineWidth = 1;
-        const iw = (cell.w - 10) / 2, ih = (cell.h - 10) / 2;
-        for (let k = 0; k < 4; k++) ctx.strokeRect(cell.x + 4 + (k % 2) * (iw + 2), cell.y + 4 + Math.floor(k / 2) * (ih + 2), iw, ih);
-        ctx.restore();
-        // activity dot
-        if (st.util > 0.02 || manual) {
-          const ph = (this.time * (0.6 + st.effClock * 0.4) + i * 0.37) % 1;
-          ctx.save();
-          ctx.fillStyle = i % 2 ? C.amber : C.green;
-          ctx.shadowColor = ctx.fillStyle;
-          ctx.shadowBlur = 8;
-          ctx.beginPath();
-          ctx.arc(cell.x + cell.w / 2, cell.y + cell.h * (1 - ph), 2.4, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.restore();
-        }
-      } else {
+    const ns = s.nodes.find((n) => n.id === st.id)!;
+    const slotW = gw / def.maxClusters;
+    for (let k = 0; k < def.maxClusters; k++) {
+      const box: Rect = { x: gx + k * slotW + 2, y: gy, w: slotW - 4, h: gh };
+      const cl = st.clusters[k];
+      if (!cl) {
         ctx.save();
         ctx.setLineDash([4, 4]);
         ctx.strokeStyle = 'rgba(109,135,145,0.35)';
-        this.round(cell, 4); ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.fillStyle = 'rgba(109,135,145,0.4)';
-        ctx.font = '14px ui-monospace, monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText('+', cell.x + cell.w / 2, cell.y + cell.h / 2 + 5);
+        this.round(box, 6); ctx.stroke();
         ctx.restore();
+        this.label(`C${k + 1}`, box.x + box.w / 2, box.y + box.h / 2 - 4, 'rgba(109,135,145,0.55)', 11, 'center', true);
+        this.label('+', box.x + box.w / 2, box.y + box.h / 2 + 14, 'rgba(109,135,145,0.55)', 14, 'center');
+        this.view.zones.unshift({ rect: box, section: 'compute', node: st.id });
+        continue;
+      }
+      const selected = s.selectedNode === st.id && ns.cluster === k;
+      ctx.save();
+      ctx.strokeStyle = selected ? C.green : 'rgba(62,224,143,0.35)';
+      ctx.lineWidth = selected ? 2 : 1;
+      if (selected) { ctx.shadowColor = C.green; ctx.shadowBlur = 10; }
+      this.round(box, 6); ctx.stroke();
+      ctx.restore();
+      this.label(`C${k + 1}`, box.x + 5, box.y + 12, selected ? C.green : C.muted, 9, 'left', true);
+      this.view.zones.unshift({ rect: box, section: 'compute', node: st.id, cluster: k });
+
+      const maxC = def.coresPerCluster;
+      const cols = box.w > 90 ? 3 : 2;
+      const rows = Math.ceil(maxC / cols);
+      const iy = box.y + 16, ih = box.h - 20;
+      const cw = (box.w - 6) / cols, chh = ih / rows;
+      for (let i = 0; i < maxC; i++) {
+        const cell: Rect = { x: box.x + 3 + (i % cols) * cw + 2, y: iy + Math.floor(i / cols) * chh + 2, w: cw - 4, h: chh - 4 };
+        if (i < cl.cores) {
+          const glow = 0.25 + st.util * 0.6 + flash * 0.4;
+          const c = computeRed ? this.redCol(pulse) : C.green;
+          ctx.save();
+          ctx.fillStyle = `rgba(62,224,143,${0.08 + glow * 0.25})`;
+          ctx.strokeStyle = c;
+          ctx.lineWidth = 1.2;
+          ctx.shadowColor = c;
+          ctx.shadowBlur = 4 + glow * 8;
+          this.round(cell, 3); ctx.fill(); ctx.stroke();
+          ctx.restore();
+          if (cell.w > 22 && cell.h > 22) {
+            ctx.save();
+            ctx.strokeStyle = 'rgba(62,224,143,0.35)';
+            ctx.lineWidth = 1;
+            const iw = (cell.w - 10) / 2, ih2 = (cell.h - 10) / 2;
+            for (let q = 0; q < 4; q++) ctx.strokeRect(cell.x + 4 + (q % 2) * (iw + 2), cell.y + 4 + Math.floor(q / 2) * (ih2 + 2), iw, ih2);
+            ctx.restore();
+          }
+          if (st.util > 0.02 || manual) {
+            const ph = (this.time * (0.6 + cl.effClock * 0.4) + i * 0.37 + k * 0.21) % 1;
+            ctx.save();
+            ctx.fillStyle = (i + k) % 2 ? C.amber : C.green;
+            ctx.shadowColor = ctx.fillStyle;
+            ctx.shadowBlur = 8;
+            ctx.beginPath();
+            ctx.arc(cell.x + cell.w / 2, cell.y + cell.h * (1 - ph), 2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          }
+        } else {
+          ctx.save();
+          ctx.setLineDash([3, 3]);
+          ctx.strokeStyle = 'rgba(109,135,145,0.3)';
+          this.round(cell, 3); ctx.stroke();
+          ctx.restore();
+        }
       }
     }
 

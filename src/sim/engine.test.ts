@@ -38,7 +38,7 @@ describe('early game', () => {
 
 describe('simulation', () => {
   it('throttles the clock when heat exceeds cooling, and never breaks anything', () => {
-    s.nodes[0].levels = { cores: 7, clock: 40 };
+    s.nodes[0].clusters = [{ cores: 5, clock: 40 }];
     const n = rigStats(s).nodes[0];
     expect(n.heat).toBeGreaterThan(n.cool);
     expect(n.thermalFactor).toBeLessThan(1);
@@ -47,13 +47,14 @@ describe('simulation', () => {
   });
 
   it('caps compute when power draw exceeds the PSU', () => {
-    s.nodes[0].levels = { cores: 7, clock: 20, heatsink: 60 };
+    s.nodes[0].clusters = [{ cores: 5, clock: 20 }];
+    s.nodes[0].levels = { heatsink: 60 };
     const n = rigStats(s).nodes[0];
     expect(n.powerFactor).toBeLessThan(1);
   });
 
   it('upgrading cooling removes the thermal throttle', () => {
-    s.nodes[0].levels = { cores: 3, clock: 10 };
+    s.nodes[0].clusters = [{ cores: 3, clock: 10 }];
     const hot = rigStats(s).nodes[0];
     s.nodes[0].levels.heatsink = 30;
     const cool = rigStats(s).nodes[0];
@@ -83,7 +84,8 @@ describe('bottlenecks', () => {
 
   it('shows amber spare capacity when demand is the limit', () => {
     s.rigLevels.scheduler = 1;
-    s.nodes[0].levels = { cores: 7, memory: 30, heatsink: 30, psu: 30 };
+    s.nodes[0].clusters = [{ cores: 5 }];
+    s.nodes[0].levels = { memory: 30, heatsink: 30, psu: 30 };
     s.rigLevels.uplink = 30;
     s.queue = 0;
     const b = bottlenecks(s, rigStats(s));
@@ -110,7 +112,42 @@ describe('process nodes', () => {
   });
 });
 
+describe('core clusters', () => {
+  it('buying a cluster adds a new block of cores that shares the chip\'s heat', () => {
+    s.cash = 1e6;
+    const before = rigStats(s).nodes[0];
+    expect(buy(s, 'cluster', 'n14', 1)).toBe(1);
+    expect(s.nodes[0].clusters.length).toBe(2);
+    expect(s.nodes[0].cluster).toBe(1); // panel jumps to the new cluster
+    const after = rigStats(s).nodes[0];
+    expect(after.cores).toBe(before.cores + 1);
+    expect(after.heat).toBeGreaterThan(before.heat);
+  });
+
+  it('cores and clock upgrades apply to the selected cluster only', () => {
+    s.cash = 1e6;
+    buy(s, 'cluster', 'n14', 1);
+    buy(s, 'cores', 'n14', 2);
+    expect(s.nodes[0].clusters[1].cores).toBe(2);
+    expect(s.nodes[0].clusters[0].cores ?? 0).toBe(0);
+    expect(level(s, 'cores', 'n14', 0)).toBe(0);
+  });
+
+  it('a chip cannot hold more clusters than its design allows', () => {
+    s.cash = 1e12;
+    expect(buy(s, 'cluster', 'n14', 10)).toBe(1); // 14nm holds 2
+  });
+});
+
 describe('saving', () => {
+  it('moves cores and clock from old saves into the first cluster', () => {
+    const old = JSON.parse(serialise(s));
+    old.nodes = [{ id: 'n14', levels: { cores: 4, clock: 9, memory: 3 } }];
+    const back = deserialise(JSON.stringify(old))!;
+    expect(back.nodes[0].clusters[0]).toEqual({ cores: 4, clock: 9 });
+    expect(back.nodes[0].levels).toEqual({ memory: 3 });
+  });
+
   it('round-trips the game state', () => {
     s.cash = 123; s.playTime = 456;
     const back = deserialise(serialise(s))!;

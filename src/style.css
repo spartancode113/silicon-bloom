@@ -268,3 +268,12 @@ h3.sub { margin: 16px 0 10px; font-size: 12px; letter-spacing: .2em; text-transf
   .stat:nth-of-type(5) { display: none; }
 }
 .client-row .blurb, .client-row .quirk { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* core cluster picker */
+#clusters:empty { display: none; }
+.clusters { display: flex; align-items: center; gap: 6px; }
+.clusters .eyebrow { margin: 0 4px 0 0; white-space: nowrap; }
+.cl { flex: 1; padding: 4px 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); font-size: 12px; display: flex; flex-direction: column; align-items: center; line-height: 1.15; }
+.cl small { font-size: 9px; color: var(--muted); }
+.cl.active { border-color: var(--green); color: var(--green); box-shadow: 0 0 10px rgba(62,224,143,.3); }
+.cl.locked { border-style: dashed; opacity: .5; }

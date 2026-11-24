@@ -142,6 +142,22 @@ export function nodeSwitcher(s: GameState, bn: Bottleneck[]): string {
   return `<div class="nodes">${chips}</div>`;
 }
 
+/** Core cluster picker for the selected chip (Compute tab only). */
+export function clusterSwitcher(s: GameState, ui: UiState, bn: Bottleneck[]): string {
+  if (ui.section !== 'compute') return '';
+  const ns = s.nodes.find((n) => n.id === s.selectedNode)!;
+  const def = nodeDef(ns.id);
+  const red = bn.some((b) => b.node === ns.id && b.system === 'compute');
+  const btns = Array.from({ length: def.maxClusters }, (_, i) => {
+    if (i < ns.clusters.length) {
+      const c = ns.clusters[i];
+      return `<button class="cl ${ns.cluster === i ? 'active' : ''}" data-action="cluster" data-cluster="${i}">C${i + 1}<small>${1 + (c.cores ?? 0)} cores</small></button>`;
+    }
+    return `<button class="cl locked" data-action="noop" disabled>C${i + 1}<small>${i === ns.clusters.length ? 'buy below' : 'locked'}</small></button>`;
+  }).join('');
+  return `<div class="clusters"><span class="eyebrow">${def.label} clusters${red ? ' <i class="dot red"></i>' : ''}</span>${btns}</div>`;
+}
+
 export function buyToggle(ui: UiState): string {
   const opt = (v: UiState['buyAmount'], label: string) =>
     `<button class="${ui.buyAmount === v ? 'active' : ''}" data-action="amount" data-amount="${v}">${label}</button>`;
@@ -154,6 +170,7 @@ function itemValue(s: GameState, item: ItemId, node: NodeId, lvl: number): strin
   const lv = (i: ItemId) => (i === item ? lvl : ns?.levels[i] ?? 0);
   switch (item) {
     case 'scheduler': return lvl ? 'auto' : 'manual';
+    case 'cluster': return `${1 + lvl}`;
     case 'cores': return `${1 + lvl}`;
     case 'clock': return `${(d.baseClock + d.clockStep * lvl).toFixed(2)}`;
     case 'memory': return fmtNum(d.memBase * Math.pow(1.15, lvl) * Math.pow(1.06, lv('l3')));
@@ -165,28 +182,30 @@ function itemValue(s: GameState, item: ItemId, node: NodeId, lvl: number): strin
     case 'gating': return `−${lvl * 2}%`;
     case 'intake': return fmtNum(TUNING.intakeBase * Math.pow(TUNING.intakeGrowth, lvl));
     case 'uplink': return fmtNum(TUNING.uplinkBase * Math.pow(TUNING.uplinkGrowth, lvl));
+    default: return `${lvl}`;
   }
 }
 const UNIT: Partial<Record<ItemId, string>> = {
-  cores: 'cores', clock: 'GHz', memory: 'tok/s', heatsink: 'W cooling', fan: 'W cooling', psu: 'W', intake: 'req/s', uplink: 'tok/s',
+  cores: 'cores', clock: 'GHz', cluster: 'clusters', memory: 'tok/s', heatsink: 'W cooling', fan: 'W cooling', psu: 'W', intake: 'req/s', uplink: 'tok/s',
   vrm: 'power', gating: 'power', npu: 'compute', l3: 'memory',
 };
 
 export function upgradeCards(s: GameState, ui: UiState, bn: Bottleneck[]): string {
   const node = nodeDef(s.selectedNode);
   const items = itemsFor(node, ui.section).filter((i) => !(i.id === 'scheduler' && level(s, 'scheduler') > 0));
-  const flagged = (id: ItemId, scope: 'node' | 'rig') => bn.some((b) => {
+  const ns = s.nodes.find((n) => n.id === s.selectedNode)!;
+  const flagged = (id: ItemId, scope: 'cluster' | 'node' | 'rig') => bn.some((b) => {
     if (b.severity !== 'red' || !b.item) return false;
-    if (scope === 'node' && b.node !== s.selectedNode) return false;
+    if (scope !== 'rig' && b.node !== s.selectedNode) return false;
     if (b.item === id) return true;
     if (b.item === 'heatsink' && id === 'fan') return true;
-    if ((b.item === 'cores' || b.item === 'clock') && (id === 'cores' || id === 'clock' || id === 'npu')) return true;
+    if (b.system === 'compute' && (id === 'cores' || id === 'clock' || id === 'cluster' || id === 'npu')) return true;
     if (b.item === 'memory' && id === 'l3') return true;
     if (b.item === 'psu' && (id === 'vrm' || id === 'gating')) return true;
     return false;
   });
   const cards = items.map((it) => {
-    const nodeId = it.scope === 'node' ? s.selectedNode : undefined;
+    const nodeId = it.scope !== 'rig' ? s.selectedNode : undefined;
     const lvl = level(s, it.id, nodeId);
     const max = maxLevelOf(it.id, nodeId ?? s.selectedNode);
     const maxed = lvl >= max;
@@ -203,7 +222,8 @@ export function upgradeCards(s: GameState, ui: UiState, bn: Bottleneck[]): strin
     const red = flagged(it.id, it.scope);
     const cur = itemValue(s, it.id, s.selectedNode, lvl);
     const next = itemValue(s, it.id, s.selectedNode, Math.min(max, lvl + shownN));
-    const scope = it.scope === 'node' ? `<span class="scope">${node.label}</span>` : '<span class="scope rig">RIG</span>';
+    const scope = it.scope === 'cluster' ? `<span class="scope">C${ns.cluster + 1}</span>`
+      : it.scope === 'node' ? `<span class="scope">${node.label}</span>` : '<span class="scope rig">RIG</span>';
     return `<div class="up-card ${red ? 'red' : ''} ${maxed ? 'maxed' : ''}">
       ${red ? '<div class="flag">BOTTLENECK</div>' : ''}
       <div class="up-head">${scope}<b>${esc(it.name)}</b><span class="up-lv">LV ${lvl}${max < 1000 ? `/${max}` : ''}</span></div>

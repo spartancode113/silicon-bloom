@@ -1,4 +1,5 @@
 import { newGame, type GameState } from './sim/state';
+import { nodeDef } from './sim/data';
 
 const SAVE_KEY = 'silicon-bloom/save/v1';
 const SCORES_KEY = 'silicon-bloom/scores/v1';
@@ -13,7 +14,18 @@ export function deserialise(text: string | null): GameState | null {
     const data = JSON.parse(text);
     if (!data || data.version !== 1 || typeof data.playTime !== 'number') return null;
     // Fill any fields added since the save was written.
-    return { ...newGame(), ...data };
+    const s: GameState = { ...newGame(), ...data };
+    // Saves from before core clusters: move chip cores/clock into cluster 1.
+    for (const n of s.nodes) {
+      if (!Array.isArray(n.clusters)) {
+        const def = nodeDef(n.id);
+        n.clusters = [{ cores: Math.min(n.levels.cores ?? 0, def.coresPerCluster - 1), clock: n.levels.clock ?? 0 }];
+        n.cluster = 0;
+        delete n.levels.cores;
+        delete n.levels.clock;
+      }
+    }
+    return s;
   } catch {
     return null;
   }

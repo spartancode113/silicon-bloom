@@ -2,7 +2,7 @@ import './style.css';
 import type { ItemId, ModelId, NodeId, ResearchId, SectionId, TalentId } from './sim/data';
 import { talentDef } from './sim/data';
 import {
-  assignTalent, bottlenecks, buy, clickProcess, doResearch, fabNode, resetUtilCache, rigStats, setModel, tick,
+  assignTalent, bottlenecks, buy, selectCluster, clickProcess, doResearch, fabNode, resetUtilCache, rigStats, setModel, tick,
   type GameEvent, type RigStats,
 } from './sim/engine';
 import { newGame, type GameState } from './sim/state';
@@ -25,6 +25,7 @@ const el = {
   nodes: $('#nodes'),
   amount: $('#amount'),
   cards: $('#cards'),
+  clusters: $('#clusters'),
   overlay: $('#overlay'),
 };
 
@@ -109,6 +110,7 @@ function render(bn: ReturnType<typeof bottlenecks>) {
   P.setHtml(el.tabs, P.sectionTabs(ui, bn));
   P.setHtml(el.nodes, P.nodeSwitcher(game, bn));
   P.setHtml(el.amount, P.buyToggle(ui));
+  P.setHtml(el.clusters, P.clusterSwitcher(game, ui, bn));
   P.setHtml(el.cards, P.upgradeCards(game, ui, bn));
 
   const screenHtml = ui.screen === 'clients' ? P.clientsScreen(game)
@@ -142,6 +144,7 @@ const actions: Record<string, (d: DOMStringMap) => void> = {
   screen: (d) => { ui.screen = d.screen as P.Screen; },
   section: (d) => { ui.section = d.section as SectionId; },
   node: (d) => { game.selectedNode = d.node as NodeId; },
+  cluster: (d) => { selectCluster(game, game.selectedNode, Number(d.cluster)); },
   amount: (d) => { ui.buyAmount = d.amount === 'max' ? 'max' : (Number(d.amount) as 1 | 10); },
   buy: (d) => {
     const n = ui.buyAmount === 'max' ? 1000 : ui.buyAmount;
@@ -197,6 +200,7 @@ el.canvas.addEventListener('pointerdown', (e) => {
   ui.section = z.section;
   if (z.node) {
     game.selectedNode = z.node;
+    if (z.cluster !== undefined) selectCluster(game, z.node, z.cluster);
     if (clickProcess(game, events)) { rig.flashClick(); rig.burstFromChip(z.node); flushEvents(); }
   }
   render(bottlenecks(game, stats));

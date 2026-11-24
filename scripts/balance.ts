@@ -7,6 +7,7 @@ import {
   bottlenecks, fmtMoney, fmtNum, fmtTime, goalText, itemsFor, level, maxLevelOf, rigStats, setModel, tick, type GameEvent,
 } from '../src/sim/engine';
 import { newGame, type GameState } from '../src/sim/state';
+import type { Bottleneck } from '../src/sim/engine';
 import { nodeDef } from '../src/sim/data';
 
 const DT = 0.1;
@@ -18,23 +19,30 @@ function income(s: GameState): number {
   return Math.min(r.capTok, r.arrivals * r.tokPerReq) * r.price;
 }
 
-function candidates(s: GameState): { item: ItemId; node?: NodeId }[] {
-  const out: { item: ItemId; node?: NodeId }[] = [];
+interface Cand { item: ItemId; node?: NodeId; cluster?: number }
+function candidates(s: GameState): Cand[] {
+  const out: Cand[] = [];
   for (const it of ITEMS) {
-    if (it.scope === 'rig') out.push({ item: it.id });
-    else for (const n of s.nodes) if (itemsFor(nodeDef(n.id), it.section).some((x) => x.id === it.id)) out.push({ item: it.id, node: n.id });
+    if (it.scope === 'rig') { out.push({ item: it.id }); continue; }
+    for (const n of s.nodes) {
+      if (!itemsFor(nodeDef(n.id), it.section).some((x) => x.id === it.id)) continue;
+      if (it.scope === 'cluster') n.clusters.forEach((_, ci) => out.push({ item: it.id, node: n.id, cluster: ci }));
+      else out.push({ item: it.id, node: n.id });
+    }
   }
-  return out.filter((c) => level(s, c.item, c.node) < maxLevelOf(c.item, c.node));
+  return out.filter((c) => level(s, c.item, c.node, c.cluster) < maxLevelOf(c.item, c.node));
 }
+const costC = (s: GameState, c: Cand) => costOf(s, c.item, c.node, level(s, c.item, c.node, c.cluster), c.cluster);
+const buyC = (s: GameState, c: Cand) => buy(s, c.item, c.node, 1, [], c.cluster) > 0;
 
 function bestUpgrade(s: GameState) {
   const base = income(s);
-  let best: { item: ItemId; node?: NodeId; ratio: number; cost: number } | null = null;
+  let best: (Cand & { ratio: number; cost: number }) | null = null;
   for (const c of candidates(s)) {
-    const cost = costOf(s, c.item, c.node, level(s, c.item, c.node));
+    const cost = costC(s, c);
     const clone: GameState = structuredClone(s);
     clone.cash = cost + 1;
-    buy(clone, c.item, c.node, 1);
+    buyC(clone, c);
     const gain = income(clone) - base;
     if (gain <= 0) continue;
     const ratio = gain / cost;
@@ -54,7 +62,7 @@ function goalDirected(s: GameState): boolean {
     const it = ITEMS.find((i) => i.section === sp.section)!;
     return buy(s, it.id, newest, 1) > 0;
   }
-  if (sp.kind === 'clock') return s.nodes.some((n) => buy(s, 'clock', n.id, 1) > 0);
+  if (sp.kind === 'clock') return candidates(s).some((c) => c.item === 'clock' && buyC(s, c));
   if (sp.kind === 'coolUnderLoad') {
     const r = rigStats(s);
     const hot = r.nodes.filter((n) => n.temp >= sp.temp);
@@ -73,11 +81,7 @@ function goalDirected(s: GameState): boolean {
     c.burstClock = 59;
     c.queue = 100;
     const reds = bottlenecks(c, rigStats(c)).filter((b) => b.severity === 'red' && b.item);
-    for (const b of reds) {
-      const alts: ItemId[] = b.item === 'heatsink' ? ['heatsink', 'fan'] : b.item === 'cores' || b.item === 'clock' ? ['cores', 'clock'] : [b.item!];
-      alts.sort((a, z) => costOf(s, a, b.node, level(s, a, b.node)) - costOf(s, z, b.node, level(s, z, b.node)));
-      for (const a of alts) if (level(s, a, b.node) < maxLevelOf(a, b.node) && buy(s, a, b.node, 1)) return true;
-    }
+    for (const b of reds) if (fixRed(s, b)) return true;
   }
   if (sp.kind === 'queueUnder' || sp.kind === 'burstsCalm') {
     const r = rigStats(s);
@@ -122,21 +126,22 @@ function decide(s: GameState) {
     // Follow the red bottleneck like a player would; fall back to best value.
     const reds = bottlenecks(s, rigStats(s)).filter((b) => b.severity === 'red' && b.item);
     let did = false;
-    for (const b of reds) {
-      const item = b.item!;
-      if (level(s, item, b.node) >= maxLevelOf(item, b.node)) continue;
-      // Thermal: cheaper of heatsink / fan. Compute: cheaper of cores / clock.
-      const alts: ItemId[] = item === 'heatsink' ? ['heatsink', 'fan'] : item === 'cores' || item === 'clock' ? ['cores', 'clock', 'npu'] : [item];
-      const opts = alts.filter((a) => candidates(s).some((c) => c.item === a && (c.node === b.node || !c.node)));
-      opts.sort((a, b2) => costOf(s, a, b.node, level(s, a, b.node)) - costOf(s, b2, b.node, level(s, b2, b.node)));
-      if (opts[0] && buy(s, opts[0], b.node, 1)) { did = true; break; }
-    }
+    for (const b of reds) if (fixRed(s, b)) { did = true; break; }
     if (did) continue;
     if (reds.length) break; // saving up for the fix
     const b = bestUpgrade(s);
     if (!b || b.cost > s.cash) break;
-    buy(s, b.item, b.node, 1);
+    buyC(s, b);
   }
+}
+
+/** Buy the cheapest upgrade that addresses a red bottleneck. */
+function fixRed(s: GameState, b: Bottleneck): boolean {
+  const item = b.item!;
+  const alts: ItemId[] = item === 'heatsink' ? ['heatsink', 'fan'] : b.system === 'compute' ? ['cores', 'clock', 'cluster', 'npu'] : [item];
+  const opts = candidates(s).filter((c) => alts.includes(c.item) && (c.node === b.node || !c.node));
+  opts.sort((x, y) => costC(s, x) - costC(s, y));
+  return !!opts[0] && buyC(s, opts[0]);
 }
 
 const s = newGame(42);
@@ -170,7 +175,7 @@ console.log('---');
 console.log(`Finished: ${s.stageComplete} at ${fmtTime(s.playTime)}`);
 console.log(`Nodes: ${s.nodes.map((n) => nodeDef(n.id).label).join(', ')} · cap ${fmtNum(r.capTok)} tok/s · demand ${fmtNum(r.demand)} req/s · model ${s.model}`);
 console.log(`Research: ${JSON.stringify(s.research)} · Lab left ${s.lab}`);
-for (const n of s.nodes) console.log(`  ${nodeDef(n.id).label}: ${JSON.stringify(n.levels)}`);
+for (const n of s.nodes) console.log(`  ${nodeDef(n.id).label}: ${JSON.stringify(n.levels)} clusters ${JSON.stringify(n.clusters)}`);
 console.log(`  rig: ${JSON.stringify(s.rigLevels)}`);
 void RESEARCH;
 if (process.env.DEBUG) {
